@@ -270,8 +270,10 @@ footer img {
       let profile = JSON.parse(baseProfile);
       let startTime = Date.now() - shellyPlusData.length * 1000;
       profile.meta.startTime = startTime;
+      profile.meta.profilingStartTime = 0;
+      profile.meta.profilingEndTime = shellyPlusData.length * 1000;
       profile.meta.CPUName = deviceName;
-      let times = shellyPlusData.map((v, i) => startTime + i * 1000);
+      let times = shellyPlusData.map((v, i) => i * 1000);
       let zeros = new Array(times.length).fill(0);
 
       let threadSamples = profile.threads[0].samples;
