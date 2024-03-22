@@ -208,7 +208,7 @@ footer img {
     }
 
     function showGraph() {
-      let maxPowerW = Math.max(...shellyPlusData);
+      let maxPowerW = shellyPlusData.reduce((a,b) => Math.max(a,b));
       let graph = shellyPlusData.map((v, i) => ({
         x: i / (shellyPlusData.length - 1),
         y: v / maxPowerW}));
