@@ -143,9 +143,9 @@ footer img {
         }
         path += cmd;
       }
-      let x = i => (graph[i].x * graphWidth).toFixed();
+      let x = i => Math.round(graph[i].x * graphWidth);
       let y = i => graph[i].y == 0 ? graphHeight + halfStrokeWidth
-          : Math.max(halfStrokeWidth, (1 - graph[i].y) * graphHeight).toFixed();
+          : Math.round(Math.max(halfStrokeWidth, (1 - graph[i].y) * graphHeight));
       let lastX = -halfStrokeWidth * 2;
       let lastY = y(0);
       path = `${letter('M')}${lastX} ${graphHeight}V${lastY}`;
