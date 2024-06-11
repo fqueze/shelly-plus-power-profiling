@@ -15,11 +15,57 @@
 .profile > div > svg {
   position: absolute;
 }
-.profile > div > svg > path {
+path {
   fill: #73737388;
   stroke: #737373;
-  stroke-width: 6px;
+  stroke-width: 15px;
   stroke-linejoin: bevel;
+}
+/* stock-width = 3px * (viewBox width = 2400px) / min-width */
+@media (min-width: 600px) {
+  path {
+    stroke-width: 12px;
+  }
+}
+@media (min-width: 720px) {
+  path {
+    stroke-width: 10px;
+  }
+}
+@media (min-width: 900px) {
+  path {
+    stroke-width: 8px;
+  }
+}
+@media (min-width: 1020px) {
+  path {
+    stroke-width: 7px;
+  }
+}
+@media (min-width: 1200px) {
+  path {
+    stroke-width: 6px;
+  }
+}
+@media (min-width: 1440px) {
+  path {
+    stroke-width: 5px;
+  }
+}
+@media (min-width: 1800px) {
+  path {
+    stroke-width: 4px;
+  }
+}
+@media (min-width: 2400px) {
+  path {
+    stroke-width: 3px;
+  }
+}
+@media (min-width: 3400px) {
+  path {
+    stroke-width: 2px;
+  }
 }
 .profile > p {
   text-align: center;
@@ -76,10 +122,17 @@ footer img {
           result = timeMin + "min" + result;
         }
       } else {
-        result = timeS + "s";
+        result = Math.round(timeS) + "s";
       }
 
       return result;
+    }
+
+    function setDeviceName(name) {
+      deviceName = name;
+      document.title = `${deviceName} power profiling`;
+      setText("deviceNameProfile", deviceName);
+      setText("deviceNameH1", deviceName);
     }
 
     async function getDeviceName() {
@@ -89,10 +142,7 @@ footer img {
       socket.onmessage = (event) => {
         let message = JSON.parse(event.data);
         if (message.id == 1) {
-          deviceName = "Shelly " + message.result.app;
-          document.title = `${deviceName} power profiling`;
-          setText("deviceNameProfile", deviceName);
-          setText("deviceNameH1", deviceName);
+          setDeviceName("Shelly " + message.result.app);
           socket.close();
         }
       };
@@ -208,6 +258,10 @@ footer img {
     }
 
     function showGraph() {
+      if (document.hidden) {
+        return;
+      }
+
       let maxPowerW = shellyPlusData.reduce((a,b) => Math.max(a,b));
       let graph = shellyPlusData.map((v, i) => ({
         x: i / (shellyPlusData.length - 1),
@@ -249,7 +303,6 @@ footer img {
 	}
 	return keep;
       });
-      let zeros = new Array(times.length).fill(0);
       return {
         name,
         category: "power",
@@ -257,12 +310,12 @@ footer img {
         pid: "0",
         mainThreadIndex: 0,
         samples: {
-          time, number: zeros, count, length: count.length
+          time, count, length: count.length
         }
       }
     }
     function WattSecondToPicoWattHour(value) {
-      return value / 3600 * 1e12;
+      return Math.round(value / 3600 * 1e12);
     }
     function makeProfile() {
       const baseProfile = '{"meta":{"interval":1000,"startTime":0,"abi":"","misc":"","oscpu":"","platform":"","processType":0,"extensions":{"id":[],"name":[],"baseURL":[],"length":0},"categories":[{"name":"Other","color":"grey","subcategories":["Other"]}],"product":"Home power profiling","stackwalk":0,"toolkit":"","version":27,"preprocessedProfileVersion":48,"appBuildID":"","sourceURL":"","physicalCPUs":1,"logicalCPUs":0,"CPUName":"Shelly Plus","symbolicationNotSupported":true,"markerSchema":[]},"libs":[],"pages":[],"threads":[{"processType":"default","processStartupTime":0,"processShutdownTime":null,"registerTime":0,"unregisterTime":null,"pausedRanges":[],"name":"GeckoMain","isMainThread":true,"pid":"0","tid":0,"samples":{"weightType":"samples","weight":null,"eventDelay":[],"stack":[],"time":[],"length":0},"markers":{"data":[],"name":[],"startTime":[],"endTime":[],"phase":[],"category":[],"length":0},"stackTable":{"frame":[0],"prefix":[null],"category":[0],"subcategory":[0],"length":1},"frameTable":{"address":[-1],"inlineDepth":[0],"category":[null],"subcategory":[0],"func":[0],"nativeSymbol":[null],"innerWindowID":[0],"implementation":[null],"line":[null],"column":[null],"length":1},"stringTable":{"_array":["(root)"],"_stringToIndex":{}},"funcTable":{"isJS":[false],"relevantForJS":[false],"name":[0],"resource":[-1],"fileName":[null],"lineNumber":[null],"columnNumber":[null],"length":1},"resourceTable":{"lib":[],"name":[],"host":[],"type":[],"length":0},"nativeSymbols":{"libIndex":[],"address":[],"name":[],"functionSize":[],"length":0}}],"counters":[]}';
