@@ -85,7 +85,7 @@ footer img {
   </style>
 </head>
 <body>
-  <h1 id="power"><span id="deviceNameH1">Shelly Plus</span> live profile: <span id="lastPower"></span>W</h1>
+  <h1 id="power"><span id="deviceNameH1">Shelly Plus</span> live profile: <span id="lastPower"></span></h1>
   <p>Shelly script URL: <code>http://<input type=text id="ip" value="192.168.1.89">/<input type="text" id="scriptPath" value="script/1/power"></code></p>
   <div class="profile">
     <div>
@@ -95,10 +95,10 @@ footer img {
       </div>
     <p><span id="deviceNameProfile">Shelly Plus</span>, <span id="sampleCount">0</span> samples.</p>
     <ul>
-      <li>Energy used: <span id="totalEnergy"></span>Wh in <span id="totalTime"></span></li>
-      <li>Average power: <span id="averagePower"></span>W</li>
-      <li>Max power: <span id="maxPower"></span>W</li>
-      <li>Median power: <span id="medianPower"></span>W</li>
+      <li>Energy used: <span id="totalEnergy"></span> in <span id="totalTime"></span></li>
+      <li>Average power: <span id="averagePower"></span></li>
+      <li>Max power: <span id="maxPower"></span></li>
+      <li>Median power: <span id="medianPower"></span></li>
     </ul>
   </div>
   <p><a id="open" href="#">Open in the Firefox Profiler</a>. Download as: <a id="csv" href="#">csv</a>, <a id="profile" href="#">profile</a>.</p>
@@ -108,24 +108,73 @@ footer img {
     let deviceName = "Shelly Plus";
 
     function setText(id, text) {
-      document.getElementById(id).textContent = text;
+      document.getElementById(id).innerHTML = text;
     }
 
     function formatDuration(timeS) {
       let result = "";
-      if (timeS > 60) {
-        result = Math.round(timeS % 60) + "s";
+      if (timeS >= 60) {
         let timeMin = Math.floor(timeS / 60);
-        if (timeMin > 60) {
-          result = Math.floor(timeMin / 60) + "h" + (timeMin % 60) + "min";
+        if (timeMin >= 60) {
+          let timeHours = Math.floor(timeMin / 60);
+          if (timeHours >= 24) {
+            result = Math.floor(timeHours / 24) + "d";
+            let hour = timeHours % 24;
+            if (hour) {
+              result += hour + "h";
+            }
+          } else {
+            result = timeHours + "h";
+            let min = timeMin % 60;
+            if (min) {
+              result += min + "min";
+            }
+          }
         } else {
-          result = timeMin + "min" + result;
+          let sec = timeS % 60;
+          result = timeMin + "min";
+          if (sec) {
+            result += sec + "s";
+          }
         }
       } else {
-        result = Math.round(timeS) + "s";
+        result = timeS + "s";
       }
 
       return result;
+    }
+
+    function toPrecisionIfNotInt(number) {
+      // Because of floating point representations, we can get numbers like
+      // 8.000000000000007. Treat them as if they were integers.
+      let isAlmostInt = Math.round(number) == Math.round(number * 1000) / 1000;
+      return isAlmostInt ? Math.round(number)
+                         : number.toPrecision(3);
+    }
+
+    const nbsp = "&nbsp;";
+    function formatPower(powerW) {
+      if (powerW < 1 && powerW > 0) {
+        return toPrecisionIfNotInt(powerW * 1000) + nbsp + "mW";
+      }
+
+      if (powerW > 1000) {
+        return toPrecisionIfNotInt(powerW / 1000) + nbsp + "kW";
+      }
+
+      return toPrecisionIfNotInt(powerW) + nbsp + "W";
+    }
+
+    function formatEnergy(energyWh) {
+      if (energyWh < 1 && energyWh > 0) {
+        return toPrecisionIfNotInt(energyWh * 1000) + nbsp + "mWh";
+      }
+
+      if (energyWh > 1000) {
+        return toPrecisionIfNotInt(energyWh / 1000) + nbsp + "kWh";
+      }
+
+      return toPrecisionIfNotInt(energyWh) + nbsp + "Wh";
     }
 
     function setDeviceName(name) {
@@ -170,7 +219,7 @@ footer img {
         console.log("unexpected", data);
       }
       setText("sampleCount", shellyPlusData.length);
-      setText("lastPower", shellyPlusData[shellyPlusData.length - 1]);
+      setText("lastPower", formatPower(shellyPlusData[shellyPlusData.length - 1]));
       showGraph();
     }
 
@@ -268,11 +317,11 @@ footer img {
         y: v / maxPowerW}));
       document.querySelector("path").setAttribute("d", makeSVGPath(graph));
       let energyWs = shellyPlusData.reduce((acc, val) => acc + val);
-      setText("maxPower", maxPowerW);
+      setText("maxPower", formatPower(maxPowerW));
       setText("totalTime", formatDuration(shellyPlusData.length));
-      setText("averagePower", (energyWs / shellyPlusData.length).toPrecision(3));
-      setText("medianPower", shellyPlusData.slice().sort((a, b) => a - b)[Math.floor(shellyPlusData.length / 2)]);
-      setText("totalEnergy", (energyWs / 3600).toPrecision(3));
+      setText("averagePower", formatPower(energyWs / shellyPlusData.length));
+      setText("medianPower", formatPower(shellyPlusData.slice().sort((a, b) => a - b)[Math.floor(shellyPlusData.length / 2)]));
+      setText("totalEnergy", formatEnergy(energyWs / 3600));
     }
 
     setInterval(fetchSamples, 5000);
