@@ -322,8 +322,10 @@ footer img {
       return path;
     }
 
+    let graphOutdated = false;
     function showGraph() {
       if (document.hidden) {
+        graphOutdated = true;
         return;
       }
 
@@ -481,6 +483,12 @@ footer img {
     document.getElementById("csv").addEventListener("click", downloadCsv);
     document.getElementById("profile").addEventListener("click", downloadProfile);
     document.getElementById("open").addEventListener("click", openProfile);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && graphOutdated) {
+        graphOutdated = false;
+        showGraph();
+      }
+    });
   </script>
   <footer>This work © 2024 by Florian Quèze is licensed under <a href="http://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-NC 4.0<img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="CC"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="BY"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="NC"></a></footer>
 </body>
