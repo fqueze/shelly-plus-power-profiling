@@ -85,7 +85,7 @@ footer img {
   </style>
 </head>
 <body>
-  <h1 id="power"><span id="deviceNameH1">Shelly Plus</span> live profile: <span id="lastPower"></span></h1>
+  <h1 id="power"><span id="deviceNameH1">Shelly Plus</span> live profile: <span id="lastPower"></span> <span id="lastVoltage"></span></h1>
   <p>Shelly script URL: <code>http://<input type=text id="ip" value="192.168.1.89">/<input type="text" id="scriptPath" value="script/1/power"></code></p>
   <div class="profile">
     <div>
@@ -96,14 +96,14 @@ footer img {
     <p><span id="deviceNameProfile">Shelly Plus</span>, <span id="sampleCount">0</span> samples.</p>
     <ul>
       <li>Energy used: <span id="totalEnergy"></span> in <span id="totalTime"></span></li>
-      <li>Average power: <span id="averagePower"></span></li>
-      <li>Max power: <span id="maxPower"></span></li>
-      <li>Median power: <span id="medianPower"></span></li>
+      <li>Power: Average: <span id="averagePower"></span>, Median: <span id="medianPower"></span>, Max: <span id="maxPower"></span></li>
+      <li id="voltageRow">Voltage: Min: <span id="minVoltage"></span>, Average: <span id="averageVoltage"></span>, Max: <span id="maxVoltage"></span></li>
     </ul>
   </div>
   <p><a id="open" href="#">Open in the Firefox Profiler</a>. Download as: <a id="csv" href="#">csv</a>, <a id="profile" href="#">profile</a>.</p>
   <script type="application/javascript">
-    let shellyPlusData = [];
+    let shellyPlusPowerData = [];
+    let shellyPlusVoltageData = [];
     let shellyPlusLastIndex = -1;
     let deviceName = "Shelly Plus";
 
@@ -177,6 +177,10 @@ footer img {
       return toPrecisionIfNotInt(energyWh) + nbsp + "Wh";
     }
 
+    function formatVoltage(voltageV) {
+      return toPrecisionIfNotInt(voltageV) + nbsp + "V";
+    }
+
     function setDeviceName(name) {
       deviceName = name;
       document.title = `${deviceName} power profiling`;
@@ -209,17 +213,29 @@ footer img {
       let data = await response.json();
 
       if (shellyPlusLastIndex == -1) {
-        shellyPlusData = data.power_values.slice();
-        shellyPlusLastIndex = data.start_index + shellyPlusData.length;
+        shellyPlusPowerData = data.power_values.slice();
+        if (data.voltage_values) {
+          shellyPlusVoltageData = data.voltage_values.slice();
+        } else {
+          document.getElementById("voltageRow").remove();
+        }
+        shellyPlusLastIndex = data.start_index + shellyPlusPowerData.length;
       } else if (shellyPlusLastIndex < data.start_index + data.power_values.length) {
-        let newData = data.power_values.slice(shellyPlusLastIndex - data.start_index);
-        shellyPlusData = shellyPlusData.concat(newData);
-        shellyPlusLastIndex += newData.length;
+        let newPowerData = data.power_values.slice(shellyPlusLastIndex - data.start_index);
+        shellyPlusPowerData = shellyPlusPowerData.concat(newPowerData);
+        if (data.voltage_values) {
+          let newVoltageData = data.voltage_values.slice(shellyPlusLastIndex - data.start_index);
+          shellyPlusVoltageData = shellyPlusVoltageData.concat(newVoltageData);
+        }
+        shellyPlusLastIndex += newPowerData.length;
       } else {
         console.log("unexpected", data);
       }
-      setText("sampleCount", shellyPlusData.length);
-      setText("lastPower", formatPower(shellyPlusData[shellyPlusData.length - 1]));
+      setText("sampleCount", shellyPlusPowerData.length);
+      setText("lastPower", formatPower(shellyPlusPowerData[shellyPlusPowerData.length - 1]));
+      if (shellyPlusVoltageData.length) {
+        setText("lastVoltage", formatVoltage(shellyPlusVoltageData[shellyPlusVoltageData.length - 1]));
+      }
       showGraph();
     }
 
@@ -311,17 +327,23 @@ footer img {
         return;
       }
 
-      let maxPowerW = shellyPlusData.reduce((a,b) => Math.max(a,b));
-      let graph = shellyPlusData.map((v, i) => ({
-        x: i / (shellyPlusData.length - 1),
+      let maxPowerW = shellyPlusPowerData.reduce((a,b) => Math.max(a,b));
+      let graph = shellyPlusPowerData.map((v, i) => ({
+        x: i / (shellyPlusPowerData.length - 1),
         y: v / maxPowerW}));
       document.querySelector("path").setAttribute("d", makeSVGPath(graph));
-      let energyWs = shellyPlusData.reduce((acc, val) => acc + val);
+      let energyWs = shellyPlusPowerData.reduce((acc, val) => acc + val);
       setText("maxPower", formatPower(maxPowerW));
-      setText("totalTime", formatDuration(shellyPlusData.length));
-      setText("averagePower", formatPower(energyWs / shellyPlusData.length));
-      setText("medianPower", formatPower(shellyPlusData.slice().sort((a, b) => a - b)[Math.floor(shellyPlusData.length / 2)]));
+      setText("totalTime", formatDuration(shellyPlusPowerData.length));
+      setText("averagePower", formatPower(energyWs / shellyPlusPowerData.length));
+      setText("medianPower", formatPower(shellyPlusPowerData.slice().sort((a, b) => a - b)[Math.floor(shellyPlusPowerData.length / 2)]));
       setText("totalEnergy", formatEnergy(energyWs / 3600));
+
+      if (shellyPlusVoltageData.length) {
+        setText("minVoltage", formatVoltage(shellyPlusVoltageData.reduce((a,b) => Math.min(a,b))));
+        setText("averageVoltage", formatVoltage(shellyPlusVoltageData.reduce((a,b) => a + b) / shellyPlusVoltageData.length));
+        setText("maxVoltage", formatVoltage(shellyPlusVoltageData.reduce((a,b) => Math.max(a,b))));
+      }
     }
 
     setInterval(fetchSamples, 5000);
@@ -330,7 +352,7 @@ footer img {
 
     function downloadCsv(event) {
       let mimeType = "text/plain";
-      let data = shellyPlusData.join("\n");
+      let data = shellyPlusPowerData.join("\n");
       let url = URL.createObjectURL(
         new Blob([data], { type: mimeType })
       );
@@ -370,24 +392,46 @@ footer img {
       const baseProfile = '{"meta":{"interval":1000,"startTime":0,"abi":"","misc":"","oscpu":"","platform":"","processType":0,"extensions":{"id":[],"name":[],"baseURL":[],"length":0},"categories":[{"name":"Other","color":"grey","subcategories":["Other"]}],"product":"Home power profiling","stackwalk":0,"toolkit":"","version":27,"preprocessedProfileVersion":48,"appBuildID":"","sourceURL":"","physicalCPUs":1,"logicalCPUs":0,"CPUName":"Shelly Plus","symbolicationNotSupported":true,"markerSchema":[]},"libs":[],"pages":[],"threads":[{"processType":"default","processStartupTime":0,"processShutdownTime":null,"registerTime":0,"unregisterTime":null,"pausedRanges":[],"name":"GeckoMain","isMainThread":true,"pid":"0","tid":0,"samples":{"weightType":"samples","weight":null,"eventDelay":[],"stack":[],"time":[],"length":0},"markers":{"data":[],"name":[],"startTime":[],"endTime":[],"phase":[],"category":[],"length":0},"stackTable":{"frame":[0],"prefix":[null],"category":[0],"subcategory":[0],"length":1},"frameTable":{"address":[-1],"inlineDepth":[0],"category":[null],"subcategory":[0],"func":[0],"nativeSymbol":[null],"innerWindowID":[0],"implementation":[null],"line":[null],"column":[null],"length":1},"stringTable":{"_array":["(root)"],"_stringToIndex":{}},"funcTable":{"isJS":[false],"relevantForJS":[false],"name":[0],"resource":[-1],"fileName":[null],"lineNumber":[null],"columnNumber":[null],"length":1},"resourceTable":{"lib":[],"name":[],"host":[],"type":[],"length":0},"nativeSymbols":{"libIndex":[],"address":[],"name":[],"functionSize":[],"length":0}}],"counters":[]}';
 
       let profile = JSON.parse(baseProfile);
-      let startTime = Date.now() - shellyPlusData.length * 1000;
+      let startTime = Date.now() - shellyPlusPowerData.length * 1000;
       profile.meta.startTime = startTime;
       profile.meta.profilingStartTime = 0;
-      profile.meta.profilingEndTime = shellyPlusData.length * 1000;
+      profile.meta.profilingEndTime = shellyPlusPowerData.length * 1000;
       profile.meta.CPUName = deviceName;
-      let times = shellyPlusData.map((v, i) => i * 1000);
+
+      profile.meta.markerSchema = [{
+        name: "volt",
+        tooltipLabel: "{marker.data.v}",
+        display: [],
+        data: [{key: "v", label: "Voltage", format: "string"}],
+        graphs: [{key: "v", color: "orange", type: "line-filled"}],
+      }];
+
+      let times = shellyPlusPowerData.map((v, i) => i * 1000);
       let zeros = new Array(times.length).fill(0);
 
-      let threadSamples = profile.threads[0].samples;
-      threadSamples.stack = zeros;
-      threadSamples.time = times;
-      threadSamples.length = times.length;
+      let {samples, markers, stringTable} = profile.threads[0];
+      samples.stack = zeros;
+      samples.time = times;
+      samples.length = times.length;
 
       profile.counters = [
         counterObject(deviceName,
                       `Data recorded by a ${deviceName} power meter`,
-                      times, shellyPlusData.map(WattSecondToPicoWattHour))
+                      times, shellyPlusPowerData.map(WattSecondToPicoWattHour))
       ];
+
+      let voltageIndex = stringTable._array.length;
+      stringTable._array.push("Voltage");
+      for (let i = 0; i < shellyPlusVoltageData.length; ++i) {
+        markers.startTime.push(times[i]);
+        markers.endTime.push(times[i]);
+        // 0 = Instant marker, 1 = marker with start and end times, 2 = start but no end.
+        markers.phase.push(1)
+        markers.category.push(0);
+        markers.name.push(voltageIndex)
+        markers.data.push({type: "volt", v: shellyPlusVoltageData[i]});
+      }
+      markers.length = markers.name.length;
 
       return profile;
     }
