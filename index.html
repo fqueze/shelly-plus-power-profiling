@@ -842,7 +842,8 @@ footer a {
       setTimeout(() => URL.revokeObjectURL(url), 0);
     }
 
-    async function openProfile() {
+    async function openProfile(event) {
+      event.preventDefault();
       const origin = "https://profiler.firefox.com";
       const profilerURL = origin + "/from-post-message/";
       const profilerWindow = window.open(profilerURL, "_blank");
