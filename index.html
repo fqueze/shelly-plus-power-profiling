@@ -466,6 +466,42 @@ footer a {
       return (Math.round(voltageV * 10) / 10) + nbsp + "V";
     }
 
+    function calculateMedian(data) {
+      // Quickselect algorithm for finding median in O(n) average time
+      const arr = data.slice();
+      const k = Math.floor(arr.length / 2);
+
+      function partition(arr, left, right) {
+        const pivot = arr[right];
+        let i = left;
+
+        for (let j = left; j < right; ++j) {
+          if (arr[j] <= pivot) {
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+            ++i;
+          }
+        }
+        [arr[i], arr[right]] = [arr[right], arr[i]];
+        return i;
+      }
+
+      function quickselect(arr, left, right, k) {
+        if (left === right) return arr[left];
+
+        const pivotIndex = partition(arr, left, right);
+
+        if (k === pivotIndex) {
+          return arr[k];
+        } else if (k < pivotIndex) {
+          return quickselect(arr, left, pivotIndex - 1, k);
+        } else {
+          return quickselect(arr, pivotIndex + 1, right, k);
+        }
+      }
+
+      return quickselect(arr, 0, arr.length - 1, k);
+    }
+
     function setDeviceName(name) {
       deviceName = name;
       document.title = `${deviceName} power profiling`;
@@ -538,7 +574,7 @@ footer a {
     const graphHeight = 120;
     const graphWidth = 2400;
     const halfStrokeWidth = 3;
-    function makeSVGPath(graph) {
+    function makeSVGPath(powerData, maxPower) {
       let lastLetter = "";
       function letter(l) {
         if (l == lastLetter) {
@@ -554,20 +590,20 @@ footer a {
         }
         path += cmd;
       }
-      let x = i => Math.round(graph[i].x * graphWidth);
-      let y = i => graph[i].y == 0 ? graphHeight + halfStrokeWidth
-          : Math.round(Math.max(halfStrokeWidth, (1 - graph[i].y) * graphHeight));
+      let x = i => Math.round((i / (powerData.length - 1)) * graphWidth);
+      let y = i => powerData[i] == 0 ? graphHeight + halfStrokeWidth
+          : Math.round(Math.max(halfStrokeWidth, (1 - powerData[i] / maxPower) * graphHeight));
       let lastX = -halfStrokeWidth * 2;
       let lastY = y(0);
       path = `${letter('M')}${lastX} ${graphHeight}V${lastY}`;
-      for (let i = 0; i < graph.length; ++i) {
+      for (let i = 0; i < powerData.length; ++i) {
         let xi = x(i);
         let yi = y(i);
         if (xi == lastX && yi == lastY) {
           continue;
         }
         if (yi == lastY) {
-          while (i + 1 < graph.length && y(i + 1) == lastY) {
+          while (i + 1 < powerData.length && y(i + 1) == lastY) {
             xi = x(++i);
           }
           append(`${letter('h')}${xi - lastX}`);
@@ -575,9 +611,9 @@ footer a {
           if (xi == lastX) {
             let ys = [yi];
             let j = 1;
-            while (i + j < graph.length && x(i + j) == xi) {
+            while (i + j < powerData.length && x(i + j) == xi) {
               ys.push(y(i + j));
-              j++;
+              ++j;
             }
             let usefulYs = [];
             let max = Math.max(...ys);
@@ -618,29 +654,50 @@ footer a {
       return path;
     }
 
-    let graphOutdated = false;
+    // Cached statistics to avoid recalculation
+    let cachedStats = {
+      maxPower: 0,
+      energyWs: 0,
+      minVoltage: Infinity,
+      maxVoltage: -Infinity,
+      sumVoltage: 0
+    };
+    let processedSamples = 0;
+
     function showGraph() {
-      if (document.hidden) {
-        graphOutdated = true;
+      // Early return if page is hidden or no new data to process
+      if (document.hidden || processedSamples >= shellyPlusPowerData.length) {
         return;
       }
 
-      let maxPowerW = shellyPlusPowerData.reduce((a,b) => Math.max(a,b));
-      let graph = shellyPlusPowerData.map((v, i) => ({
-        x: i / (shellyPlusPowerData.length - 1),
-        y: v / maxPowerW}));
-      document.querySelector("path").setAttribute("d", makeSVGPath(graph));
-      let energyWs = shellyPlusPowerData.reduce((acc, val) => acc + val);
-      setText("maxPower", formatPower(maxPowerW));
+      // Update cached statistics for new samples only
+      while (processedSamples < shellyPlusPowerData.length) {
+        const power = shellyPlusPowerData[processedSamples];
+        if (power > cachedStats.maxPower) cachedStats.maxPower = power;
+        cachedStats.energyWs += power;
+
+        if (shellyPlusVoltageData.length) {
+          const voltage = shellyPlusVoltageData[processedSamples];
+          if (voltage < cachedStats.minVoltage) cachedStats.minVoltage = voltage;
+          if (voltage > cachedStats.maxVoltage) cachedStats.maxVoltage = voltage;
+          cachedStats.sumVoltage += voltage;
+        }
+
+        ++processedSamples;
+      }
+
+      document.querySelector("path").setAttribute("d", makeSVGPath(shellyPlusPowerData, cachedStats.maxPower));
+
+      setText("maxPower", formatPower(cachedStats.maxPower));
       setText("totalTime", formatDuration(shellyPlusPowerData.length));
-      setText("averagePower", formatPower(energyWs / shellyPlusPowerData.length));
-      setText("medianPower", formatPower(shellyPlusPowerData.slice().sort((a, b) => a - b)[Math.floor(shellyPlusPowerData.length / 2)]));
-      setText("totalEnergy", formatEnergy(energyWs / 3600));
+      setText("averagePower", formatPower(cachedStats.energyWs / shellyPlusPowerData.length));
+      setText("medianPower", formatPower(calculateMedian(shellyPlusPowerData)));
+      setText("totalEnergy", formatEnergy(cachedStats.energyWs / 3600));
 
       if (shellyPlusVoltageData.length) {
-        setText("minVoltage", formatVoltage(shellyPlusVoltageData.reduce((a,b) => Math.min(a,b))));
-        setText("averageVoltage", formatVoltage(shellyPlusVoltageData.reduce((a,b) => a + b) / shellyPlusVoltageData.length));
-        setText("maxVoltage", formatVoltage(shellyPlusVoltageData.reduce((a,b) => Math.max(a,b))));
+        setText("minVoltage", formatVoltage(cachedStats.minVoltage));
+        setText("averageVoltage", formatVoltage(cachedStats.sumVoltage / shellyPlusVoltageData.length));
+        setText("maxVoltage", formatVoltage(cachedStats.maxVoltage));
       }
     }
 
@@ -821,8 +878,7 @@ footer a {
     document.getElementById("profile").addEventListener("click", downloadProfile);
     document.getElementById("open").addEventListener("click", openProfile);
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && graphOutdated) {
-        graphOutdated = false;
+      if (!document.hidden) {
         showGraph();
       }
     });
