@@ -104,6 +104,8 @@ footer img {
   <script type="application/javascript">
     let shellyPlusPowerData = [];
     let shellyPlusVoltageData = [];
+    let shellyPlusFreqData = [];
+    let shellyPlusPfData = [];
     let shellyPlusLastIndex = -1;
     let deviceName = "Shelly Plus";
 
@@ -178,7 +180,7 @@ footer img {
     }
 
     function formatVoltage(voltageV) {
-      return toPrecisionIfNotInt(voltageV) + nbsp + "V";
+      return (Math.round(voltageV * 10) / 10) + nbsp + "V";
     }
 
     function setDeviceName(name) {
@@ -219,6 +221,10 @@ footer img {
         } else {
           document.getElementById("voltageRow").remove();
         }
+        if (data.freq_values) {
+          shellyPlusFreqData = data.freq_values.slice();
+          shellyPlusPfData = data.pf_values.slice();
+        }
         shellyPlusLastIndex = data.start_index + shellyPlusPowerData.length;
       } else if (shellyPlusLastIndex < data.start_index + data.power_values.length) {
         let newPowerData = data.power_values.slice(shellyPlusLastIndex - data.start_index);
@@ -226,6 +232,12 @@ footer img {
         if (data.voltage_values) {
           let newVoltageData = data.voltage_values.slice(shellyPlusLastIndex - data.start_index);
           shellyPlusVoltageData = shellyPlusVoltageData.concat(newVoltageData);
+        }
+        if (data.freq_values) {
+          let newFreqData = data.freq_values.slice(shellyPlusLastIndex - data.start_index);
+          shellyPlusFreqData = shellyPlusFreqData.concat(newFreqData);
+          let newPfData = data.pf_values.slice(shellyPlusLastIndex - data.start_index);
+          shellyPlusPfData = shellyPlusPfData.concat(newPfData);
         }
         shellyPlusLastIndex += newPowerData.length;
       } else {
@@ -400,13 +412,29 @@ footer img {
       profile.meta.profilingEndTime = shellyPlusPowerData.length * 1000;
       profile.meta.CPUName = deviceName;
 
-      profile.meta.markerSchema = [{
-        name: "volt",
-        tooltipLabel: "{marker.data.v}",
-        display: [],
-        data: [{key: "v", label: "Voltage", format: "string"}],
-        graphs: [{key: "v", color: "orange", type: "line-filled"}],
-      }];
+      profile.meta.markerSchema = [
+        {
+          name: "volt",
+          tooltipLabel: "{marker.data.v}",
+          display: [],
+          data: [{key: "v", label: "Voltage", format: "string"}],
+          graphs: [{key: "v", color: "orange", type: "line-filled"}],
+        },
+        {
+          name: "pf",
+          tooltipLabel: "{marker.data.pf}",
+          display: [],
+          data: [{key: "pf", label: "Power factor", format: "string"}],
+          graphs: [{key: "pf", color: "blue", type: "line-filled"}],
+        },
+        {
+          name: "f",
+          tooltipLabel: "{marker.data.f}",
+          display: [],
+          data: [{key: "f", label: "Frequency (Hz)", format: "string"}],
+          graphs: [{key: "f", color: "grey", type: "line-filled"}],
+        }
+      ];
 
       let times = shellyPlusPowerData.map((v, i) => i * 1000);
       let zeros = new Array(times.length).fill(0);
@@ -433,6 +461,31 @@ footer img {
         markers.name.push(voltageIndex)
         markers.data.push({type: "volt", v: shellyPlusVoltageData[i]});
       }
+
+      let freqIndex = stringTable._array.length;
+      stringTable._array.push("Frequency");
+      for (let i = 0; i < shellyPlusFreqData.length; ++i) {
+        markers.startTime.push(times[i]);
+        markers.endTime.push(times[i]);
+        // 0 = Instant marker, 1 = marker with start and end times, 2 = start but no end.
+        markers.phase.push(1)
+        markers.category.push(0);
+        markers.name.push(freqIndex)
+        markers.data.push({type: "f", f: shellyPlusFreqData[i]});
+      }
+
+      let pfIndex = stringTable._array.length;
+      stringTable._array.push("Power Factor");
+      for (let i = 0; i < shellyPlusPfData.length; ++i) {
+        markers.startTime.push(times[i]);
+        markers.endTime.push(times[i]);
+        // 0 = Instant marker, 1 = marker with start and end times, 2 = start but no end.
+        markers.phase.push(1)
+        markers.category.push(0);
+        markers.name.push(pfIndex)
+        markers.data.push({type: "pf", pf: shellyPlusPfData[i]});
+      }
+
       markers.length = markers.name.length;
 
       return profile;
