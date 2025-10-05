@@ -344,6 +344,62 @@ footer img {
 footer a {
   color: #374151;
 }
+
+.status-indicator {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.5em;
+  vertical-align: middle;
+  transition: opacity 0.3s;
+}
+
+.status-indicator circle {
+  fill: none;
+  stroke-width: 2;
+}
+
+.status-indicator circle:first-child {
+  stroke: #064e3b22;
+}
+
+.status-indicator #statusProgress {
+  stroke: #064e3b88;
+  stroke-dasharray: 50.265;
+  stroke-dashoffset: 50.265;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+
+.status-indicator.fetching #statusProgress {
+  stroke-dashoffset: 50.265;
+}
+
+.status-indicator.waiting #statusProgress {
+  animation: fillCircle 5s linear forwards;
+}
+
+@keyframes fillCircle {
+  from {
+    stroke-dashoffset: 50.265;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.status-indicator.error #statusProgress {
+  stroke: #dc2626 !important;
+  stroke-dashoffset: 0 !important;
+}
+
+.status-indicator.stale {
+  opacity: 0.3;
+}
+
+.status-indicator.stale #statusProgress {
+  stroke-dashoffset: 0;
+}
   </style>
 </head>
 <body>
@@ -354,6 +410,10 @@ footer a {
   </header>
   <div class="content">
     <h1 id="power">Live profile: <span id="lastPower">—</span> <span id="lastVoltage"></span></h1>
+    <p><svg id="statusIndicator" class="status-indicator" viewBox="0 0 20 20">
+      <circle cx="10" cy="10" r="8" />
+      <circle id="statusProgress" cx="10" cy="10" r="8" />
+    </svg><span id="statusText">Waiting for initial data...</span></p>
     <p>Shelly script URL: <code>http://<input type=text id="ip" value="192.168.1.89">/<input type="text" id="scriptPath" value="script/1/power"></code></p>
   <div class="profile">
     <div>
@@ -385,6 +445,7 @@ footer a {
   </div>
   </div>
   <script type="application/javascript">
+    const UPDATE_INTERVAL_MS = 5000;
     let shellyPlusPowerData = [];
     let shellyPlusVoltageData = [];
     let shellyPlusFreqData = [];
@@ -526,13 +587,28 @@ footer a {
     }
 
     async function fetchSamples() {
+      updateStatus(true);
+
       let url = `http://${document.getElementById("ip").value}/${document.getElementById("scriptPath").value}`;
       if (shellyPlusLastIndex > 0) {
         url += "?" + (shellyPlusLastIndex);
       }
-      let response = await fetch(url);
-      let data = await response.json();
 
+      let data;
+      try {
+        let response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        data = await response.json();
+      } catch (error) {
+        console.error("Failed to fetch samples:", error);
+        lastError = error.message;
+        updateStatus();
+        return;
+      }
+
+      // Process the received data
       if (shellyPlusLastIndex == -1) {
         shellyPlusPowerData = data.power_values.slice();
         if (data.voltage_values) {
@@ -569,6 +645,11 @@ footer a {
         setText("lastVoltage", formatVoltage(shellyPlusVoltageData[shellyPlusVoltageData.length - 1]));
       }
       showGraph();
+
+      // Update status on success
+      lastUpdateTime = Date.now();
+      lastError = null;
+      updateStatus();
     }
 
     const graphHeight = 120;
@@ -664,6 +745,38 @@ footer a {
     };
     let processedSamples = 0;
 
+    // Status tracking
+    let lastUpdateTime = null;
+    let lastError = null;
+
+    function setIndicatorStatus(status) {
+      const indicator = document.getElementById("statusIndicator");
+      indicator.classList.remove('fetching', 'waiting', 'error', 'stale');
+      if (status) {
+        indicator.classList.add(status);
+      }
+    }
+
+    function updateStatus(isFetching) {
+      if (document.hidden) {
+        return;
+      }
+
+      let message;
+      if (lastError) {
+        message = `Error: ${lastError}`;
+        setIndicatorStatus('error');
+      } else if (lastUpdateTime) {
+        message = `Last update: ${new Date(lastUpdateTime).toLocaleTimeString()}`;
+        const isStale = (Date.now() - lastUpdateTime >= UPDATE_INTERVAL_MS * 2);
+        setIndicatorStatus(isStale ? 'stale' : isFetching ? 'fetching' : 'waiting');
+      } else {
+        // "Waiting for initial data..." is already in the initial HTML.
+        return;
+      }
+      document.getElementById("statusText").textContent = message;
+    }
+
     function showGraph() {
       // Early return if page is hidden or no new data to process
       if (document.hidden || processedSamples >= shellyPlusPowerData.length) {
@@ -701,9 +814,10 @@ footer a {
       }
     }
 
-    setInterval(fetchSamples, 5000);
+    setInterval(fetchSamples, UPDATE_INTERVAL_MS);
     getDeviceName();
     fetchSamples();
+    updateStatus();
 
     function downloadCsv(event) {
       let mimeType = "text/plain";
@@ -881,6 +995,7 @@ footer a {
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         showGraph();
+        updateStatus();
       }
     });
   </script>
