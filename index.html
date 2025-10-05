@@ -405,7 +405,7 @@ footer a {
 <body>
   <header>
     <div>
-      <h3><span id="deviceNameH1">Shelly Plus</span> Power Profiling</h3>
+      <h3>Shelly Power Profiling<span id="deviceNameH1"></span></h3>
     </div>
   </header>
   <div class="content">
@@ -567,7 +567,7 @@ footer a {
       deviceName = name;
       document.title = `${deviceName} power profiling`;
       setText("deviceNameProfile", deviceName);
-      setText("deviceNameH1", deviceName);
+      setText("deviceNameH1", ": " + deviceName);
     }
 
     async function getDeviceName() {
