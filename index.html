@@ -54,7 +54,7 @@ h1 {
   font-weight: 400;
   letter-spacing: 0;
   margin-top: 0;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
   color: #042f2e;
 }
 
@@ -149,15 +149,30 @@ input[type="text"] {
   padding-top: 1px;
   border-left: 5px solid #064e3b88;
   border-right: 5px solid #064e3b88;
-  border-top: 5px solid #064e3b88;
   position: relative;
   padding-bottom: calc(5% - 1px);
+}
+.profile > div:first-of-type {
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
+  border-top: 5px solid #064e3b88;
   overflow: hidden;
+}
+.profile > div + div {
+  border-top: solid 1.5px #064e3b88;
 }
 .profile > div > svg {
   position: absolute;
+}
+.profile > div + div::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: #064e3b88;
+  pointer-events: none;
 }
 .profile path {
   fill: #064e3b88;
@@ -225,6 +240,38 @@ input[type="text"] {
   border-top: 1px solid #e5e7eb;
   display: block;
   content: "";
+}
+
+
+.chart-tooltip {
+  position: absolute;
+  background: #042f2e;
+  color: #e5e7eb;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  pointer-events: none;
+  z-index: 100;
+  display: none;
+}
+
+#switchPowerLine:empty {
+  display: none;
+}
+
+#switchPowerLine {
+  margin: 0.5rem 0;
+}
+
+#switchPowerLine > span {
+  display: inline-block;
+  min-width: 8em;
+  text-align: left;
+  margin-right: 2rem;
+}
+
+#switchPowerLine > span:last-child {
+  margin-right: 0;
 }
 
 .profile > table {
@@ -354,6 +401,14 @@ footer a {
   transition: opacity 0.3s;
 }
 
+#statusText {
+  vertical-align: middle;
+}
+
+.content:not(.has-data) > *:not(:first-child) {
+  visibility: hidden;
+}
+
 .status-indicator circle {
   fill: none;
   stroke-width: 2;
@@ -400,6 +455,21 @@ footer a {
 .status-indicator.stale #statusProgress {
   stroke-dashoffset: 0;
 }
+
+.switch-name {
+  cursor: text;
+  border-bottom: 1px dotted transparent;
+}
+
+.switch-name:hover {
+  border-bottom-color: #064e3b;
+  background-color: #f3f4f6;
+}
+
+.profile > div > svg > circle {
+  fill: #042f2e;
+}
+
   </style>
 </head>
 <body>
@@ -416,19 +486,22 @@ footer a {
     </div>
   </header>
   <div class="content">
-    <h1 id="power">Live profile: <span id="lastPower">—</span> <span id="lastVoltage"></span></h1>
-    <p><svg id="statusIndicator" class="status-indicator" viewBox="0 0 20 20">
+    <p>Shelly script URL: <code>http://<input type=text id="ip" value="192.168.1.89">/<input type="text" id="scriptPath" value="script/1/power"></code> <svg id="statusIndicator" class="status-indicator" viewBox="0 0 20 20">
       <circle cx="10" cy="10" r="8" />
       <circle id="statusProgress" cx="10" cy="10" r="8" />
     </svg><span id="statusText">Waiting for initial data...</span></p>
-    <p>Shelly script URL: <code>http://<input type=text id="ip" value="192.168.1.89">/<input type="text" id="scriptPath" value="script/1/power"></code></p>
-  <div class="profile">
-    <div>
+    <h1 id="power">Live profile: <span id="lastPower">—</span> <span id="lastVoltage"></span></h1>
+    <p id="switchPowerLine"></p>
+  <div class="profile" id="chartContainer">
+    <!-- Main total chart -->
+    <div id="totalChart">
       <svg viewBox="0 0 2400 120">
         <path d=""/>
       </svg>
     </div>
-    <p><span id="deviceNameProfile">Shelly Plus</span>, <span id="sampleCount">0</span> samples<a class="profiler-link" target="_blank" title="Open in the Firefox Profiler" id="open" href="#"></a></p>
+    <p id="profileDescription"><span id="deviceNameProfile"></span>, <span id="sampleCount">0</span> samples<a class="profiler-link" target="_blank" title="Open in the Firefox Profiler" id="open" href="#"></a></p>
+  </div>
+  <div class="profile">
     <table>
       <tr><th>Consumption</th><td><span id="totalEnergy">—</span></td></tr>
       <tr><th>Duration</th><td><span id="totalTime">—</span></td></tr>
@@ -457,8 +530,25 @@ footer a {
     let shellyPlusVoltageData = [];
     let shellyPlusFreqData = [];
     let shellyPlusPfData = [];
+    let shellySwitchPowerData = []; // For individual switch data from Power Strip Gen4
     let shellyPlusLastIndex = -1;
     let deviceName = "Shelly Plus";
+    let switchChartsCreated = false;
+    // Load switch names from URL hash
+    let switchNames = {};
+    try {
+      if (location.hash) {
+        const params = new URLSearchParams(location.hash.substring(1));
+        for (const [key, value] of params) {
+          if (key.startsWith('s') && /^\d+$/.test(key.substring(1))) {
+            const switchId = parseInt(key.substring(1));
+            switchNames[switchId] = value;
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore errors, use empty object
+    }
 
     function setText(id, text) {
       document.getElementById(id).innerHTML = text;
@@ -506,28 +596,28 @@ footer a {
     }
 
     const nbsp = "&nbsp;";
-    function formatPower(powerW) {
+    function formatPower(powerW, separator = nbsp) {
       if (powerW < 1 && powerW > 0) {
-        return toPrecisionIfNotInt(powerW * 1000) + nbsp + "mW";
+        return toPrecisionIfNotInt(powerW * 1000) + separator + "mW";
       }
 
       if (powerW > 1000) {
-        return toPrecisionIfNotInt(powerW / 1000) + nbsp + "kW";
+        return toPrecisionIfNotInt(powerW / 1000) + separator + "kW";
       }
 
-      return toPrecisionIfNotInt(powerW) + nbsp + "W";
+      return toPrecisionIfNotInt(powerW) + separator + "W";
     }
 
-    function formatEnergy(energyWh) {
+    function formatEnergy(energyWh, separator = nbsp) {
       if (energyWh < 1 && energyWh > 0) {
-        return toPrecisionIfNotInt(energyWh * 1000) + nbsp + "mWh";
+        return toPrecisionIfNotInt(energyWh * 1000) + separator + "mWh";
       }
 
       if (energyWh > 1000) {
-        return toPrecisionIfNotInt(energyWh / 1000) + nbsp + "kWh";
+        return toPrecisionIfNotInt(energyWh / 1000) + separator + "kWh";
       }
 
-      return toPrecisionIfNotInt(energyWh) + nbsp + "Wh";
+      return toPrecisionIfNotInt(energyWh) + separator + "Wh";
     }
 
     function formatVoltage(voltageV) {
@@ -617,7 +707,25 @@ footer a {
 
       // Process the received data
       if (shellyPlusLastIndex == -1) {
-        shellyPlusPowerData = data.power_values.slice();
+        // multiple power meters: power_values is an array power values.
+        if (Array.isArray(data.power_values[0])) {
+          shellySwitchPowerData = data.power_values.map(arr => arr.slice());
+          // Compute totals from switch data
+          shellyPlusPowerData = [];
+          for (let i = 0; i < data.power_values[0].length; ++i) {
+            let total = 0;
+            for (let switchId = 0; switchId < data.power_values.length; ++switchId) {
+              if (i < data.power_values[switchId].length) {
+                total += data.power_values[switchId][i];
+              }
+            }
+            shellyPlusPowerData.push(total);
+          }
+        } else {
+          // Single power meter format
+          shellyPlusPowerData = data.power_values.slice();
+        }
+
         if (data.voltage_values) {
           shellyPlusVoltageData = data.voltage_values.slice();
         } else {
@@ -629,32 +737,129 @@ footer a {
           shellyPlusPfData = data.pf_values.slice();
         }
         shellyPlusLastIndex = data.start_index + shellyPlusPowerData.length;
-      } else if (shellyPlusLastIndex < data.start_index + data.power_values.length) {
-        let newPowerData = data.power_values.slice(shellyPlusLastIndex - data.start_index);
-        shellyPlusPowerData = shellyPlusPowerData.concat(newPowerData);
+
+        // Show content and update time for initial data
+        if (shellyPlusPowerData.length > 0) {
+          lastUpdateTime = Date.now();
+          document.querySelector('.content').classList.add('has-data');
+        }
+      } else if (shellyPlusLastIndex < data.start_index + (Array.isArray(data.power_values[0]) ? data.power_values[0].length : data.power_values.length)) {
+        let sliceStart = shellyPlusLastIndex - data.start_index;
+
+        if (Array.isArray(data.power_values[0])) {
+          // multiple power meters for format
+          for (let switchId = 0; switchId < data.power_values.length; ++switchId) {
+            let newSwitchData = data.power_values[switchId].slice(sliceStart);
+            if (shellySwitchPowerData[switchId]) {
+              shellySwitchPowerData[switchId] = shellySwitchPowerData[switchId].concat(newSwitchData);
+            } else {
+              shellySwitchPowerData[switchId] = newSwitchData;
+            }
+          }
+          // Compute new total data
+          for (let i = 0; i < data.power_values[0].length - sliceStart; ++i) {
+            let total = 0;
+            for (let switchId = 0; switchId < data.power_values.length; ++switchId) {
+              if (sliceStart + i < data.power_values[switchId].length) {
+                total += data.power_values[switchId][sliceStart + i];
+              }
+            }
+            shellyPlusPowerData.push(total);
+          }
+        } else {
+          // Single power meter format
+          let newPowerData = data.power_values.slice(sliceStart);
+          shellyPlusPowerData = shellyPlusPowerData.concat(newPowerData);
+        }
+
         if (data.voltage_values) {
-          let newVoltageData = data.voltage_values.slice(shellyPlusLastIndex - data.start_index);
+          let newVoltageData = data.voltage_values.slice(sliceStart);
           shellyPlusVoltageData = shellyPlusVoltageData.concat(newVoltageData);
         }
         if (data.freq_values) {
-          let newFreqData = data.freq_values.slice(shellyPlusLastIndex - data.start_index);
+          let newFreqData = data.freq_values.slice(sliceStart);
           shellyPlusFreqData = shellyPlusFreqData.concat(newFreqData);
-          let newPfData = data.pf_values.slice(shellyPlusLastIndex - data.start_index);
+          let newPfData = data.pf_values.slice(sliceStart);
           shellyPlusPfData = shellyPlusPfData.concat(newPfData);
         }
-        shellyPlusLastIndex += newPowerData.length;
+
+        let dataLength = Array.isArray(data.power_values[0]) ? data.power_values[0].length - sliceStart : data.power_values.length - sliceStart;
+        shellyPlusLastIndex += dataLength;
+
+        // Update last update time only when we actually receive new samples
+        if (dataLength > 0) {
+          lastUpdateTime = Date.now();
+        }
       } else {
         console.log("unexpected", data);
       }
       setText("sampleCount", shellyPlusPowerData.length);
-      setText("lastPower", formatPower(shellyPlusPowerData[shellyPlusPowerData.length - 1]));
+      setText("lastPower", formatPower(shellyPlusPowerData.at(-1)));
       if (shellyPlusVoltageData.length) {
-        setText("lastVoltage", formatVoltage(shellyPlusVoltageData[shellyPlusVoltageData.length - 1]));
+        setText("lastVoltage", formatVoltage(shellyPlusVoltageData.at(-1)));
       }
+
+      // Update individual switch power values display
+      if (shellySwitchPowerData.length > 0) {
+        const switchPowerLine = document.getElementById("switchPowerLine");
+
+        // Initialize spans if they don't exist yet
+        if (switchPowerLine.children.length === 0) {
+          for (let switchId = 0; switchId < shellySwitchPowerData.length; switchId++) {
+            let switchData = shellySwitchPowerData[switchId];
+            if (switchData && switchData.length > 0) {
+              const span = document.createElement('span');
+              const switchName = switchNames[switchId] || `Switch ${switchId}`;
+              span.innerHTML = `<span class="switch-name" data-switch-id="${switchId}">${switchName}</span>: <span class="power-value">${formatPower(switchData.at(-1), ' ')}</span>`;
+
+              // Add hover event to compute stats on demand
+              span.addEventListener('mouseenter', () => {
+                const currentData = shellySwitchPowerData[switchId];
+                if (currentData && currentData.length > 0) {
+                  const max = Math.max(...currentData);
+                  const sum = currentData.reduce((a, b) => a + b, 0);
+                  const average = sum / currentData.length;
+                  const median = calculateMedian(currentData);
+                  const energy = sum / 3600; // Convert Ws to Wh
+
+                  // Create tooltip content using regular spaces
+                  const tooltipContent = `Median: ${formatPower(median, ' ')}
+Average: ${formatPower(average, ' ')}
+Max: ${formatPower(max, ' ')}
+Total Energy: ${formatEnergy(energy, ' ')}`;
+                  span.title = tooltipContent;
+                }
+              });
+
+              switchPowerLine.appendChild(span);
+            }
+          }
+
+          // Add click listeners to switch names
+          document.querySelectorAll('.switch-name').forEach(nameElement => {
+            nameElement.addEventListener('click', (e) => {
+              e.preventDefault();
+              editSwitchName(nameElement);
+            });
+          });
+        } else {
+          // Update only the power values in existing spans
+          for (let switchId = 0; switchId < shellySwitchPowerData.length; switchId++) {
+            let switchData = shellySwitchPowerData[switchId];
+            if (switchData && switchData.length > 0 && switchId < switchPowerLine.children.length) {
+              const span = switchPowerLine.children[switchId];
+              const powerValueElement = span.querySelector('.power-value');
+              if (powerValueElement) {
+                powerValueElement.textContent = formatPower(switchData.at(-1), ' ');
+              }
+            }
+          }
+        }
+      }
+
       showGraph();
 
       // Update status on success
-      lastUpdateTime = Date.now();
       lastError = null;
       updateStatus();
     }
@@ -806,7 +1011,7 @@ footer a {
         ++processedSamples;
       }
 
-      document.querySelector(".profile path").setAttribute("d", makeSVGPath(shellyPlusPowerData, cachedStats.maxPower));
+      document.querySelector("#totalChart path").setAttribute("d", makeSVGPath(shellyPlusPowerData, cachedStats.maxPower));
 
       setText("maxPower", formatPower(cachedStats.maxPower));
       setText("totalTime", formatDuration(shellyPlusPowerData.length));
@@ -819,7 +1024,180 @@ footer a {
         setText("averageVoltage", formatVoltage(cachedStats.sumVoltage / shellyPlusVoltageData.length));
         setText("maxVoltage", formatVoltage(cachedStats.maxVoltage));
       }
+
+      // Update individual switch data if available
+      if (shellySwitchPowerData.length > 0) {
+
+        // Create switch chart divs if not already created
+        if (!switchChartsCreated) {
+          const chartContainer = document.getElementById("chartContainer");
+          const totalChart = document.getElementById("totalChart");
+
+          for (let i = 0; i < shellySwitchPowerData.length; ++i) {
+            const switchChart = document.createElement('div');
+            switchChart.id = `switch${i}Chart`;
+            switchChart.innerHTML = '<svg viewBox="0 0 2400 120"><path d=""/></svg>';
+            switchChart.dataset.switchId = i;
+            chartContainer.insertBefore(switchChart, totalChart);
+
+            // Add mouse event listeners for tooltip
+            addChartTooltip(switchChart, () => shellySwitchPowerData[i], i);
+          }
+
+          // Update the main chart tooltip to show "Total:" now that we have switches
+          addChartTooltip(totalChart, () => shellyPlusPowerData, 'total');
+
+          switchChartsCreated = true;
+        }
+
+        for (let switchId = 0; switchId < shellySwitchPowerData.length; switchId++) {
+          let switchData = shellySwitchPowerData[switchId];
+          if (switchData && switchData.length > 0) {
+            // Calculate max for chart scaling
+            let max = Math.max(...switchData);
+
+            // Draw individual switch chart
+            let switchChart = document.querySelector(`#switch${switchId}Chart path`);
+            switchChart.setAttribute("d", makeSVGPath(switchData, max));
+          }
+        }
+      }
     }
+
+    function editSwitchName(nameElement) {
+      const switchId = parseInt(nameElement.dataset.switchId);
+      const currentName = nameElement.textContent;
+
+      // Create input element
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentName;
+      input.style.width = '100px';
+      input.style.fontSize = 'inherit';
+      input.style.fontFamily = 'inherit';
+
+      // Replace the name element with input
+      nameElement.parentNode.replaceChild(input, nameElement);
+      input.focus();
+      input.select();
+
+      input.addEventListener('blur', () => {
+        const newName = input.value.trim() || `Switch ${switchId}`;
+        switchNames[switchId] = newName;
+        updateUrlHash();
+        nameElement.textContent = newName;
+        input.parentNode.replaceChild(nameElement, input);
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          input.blur();
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          input.blur();
+          const targetSwitchId = e.shiftKey ? switchId - 1 : switchId + 1;
+          const targetNameElement = document.querySelector(`.switch-name[data-switch-id="${targetSwitchId}"]`);
+          if (targetNameElement) {
+            setTimeout(() => editSwitchName(targetNameElement), 0);
+          }
+        } else if (e.key === 'Escape') {
+          nameElement.textContent = currentName;
+          input.parentNode.replaceChild(nameElement, input);
+        }
+      });
+    }
+
+    function updateUrlHash() {
+      const params = new URLSearchParams();
+
+      // Add custom switch names (only if different from default)
+      for (const [switchId, customName] of Object.entries(switchNames)) {
+        const defaultName = `Switch ${switchId}`;
+        if (customName && customName !== defaultName) {
+          params.set(`s${switchId}`, customName);
+        }
+      }
+
+      if (params.toString()) {
+        location.hash = params.toString();
+      } else {
+        // Remove hash if no custom names
+        if (location.hash) {
+          history.replaceState(null, null, ' ');
+        }
+      }
+    }
+
+    // Add tooltip functionality
+    let tooltip = null;
+    let hoverDot = null;
+
+    function addChartTooltip(chartDiv, getDataArray, switchId = null) {
+      if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.className = 'chart-tooltip';
+        document.body.appendChild(tooltip);
+      }
+
+      const svg = chartDiv.querySelector('svg');
+      if (!svg) return;
+
+      // Create hover dot if it doesn't exist
+      if (!hoverDot) {
+        hoverDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        hoverDot.setAttribute('r', '9');
+        hoverDot.style.display = 'none';
+      }
+
+      svg.addEventListener('mousemove', (e) => {
+        const dataArray = getDataArray();
+        if (!dataArray || dataArray.length === 0) return;
+
+        const rect = svg.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const xRatio = x / rect.width;
+        const dataIndex = Math.min(Math.floor(xRatio * dataArray.length), dataArray.length - 1);
+
+        if (dataIndex >= 0 && dataIndex < dataArray.length) {
+          const power = dataArray[dataIndex];
+          let content;
+          if (switchId === 'total') {
+            content = `Total: ${formatPower(power)}`;
+          } else if (switchId !== null) {
+            const switchName = switchNames[switchId] || `Switch ${switchId}`;
+            content = `${switchName}: ${formatPower(power)}`;
+          } else {
+            content = formatPower(power);
+          }
+          tooltip.innerHTML = content;
+          tooltip.style.display = 'block';
+          tooltip.style.left = e.pageX + 10 + 'px';
+          tooltip.style.top = e.pageY - 30 + 'px';
+
+          // Position and show the hover dot
+          const xPosition = (dataIndex / (dataArray.length - 1)) * 2400;
+          const maxPower = Math.max(...dataArray);
+          const yPosition = maxPower > 0 ? 120 - (power / maxPower) * 120 : 60;
+
+          hoverDot.setAttribute('cx', xPosition);
+          hoverDot.setAttribute('cy', yPosition);
+          hoverDot.style.display = 'block';
+
+          // Add dot to current SVG if not already there
+          if (!svg.contains(hoverDot)) {
+            svg.appendChild(hoverDot);
+          }
+        }
+      });
+
+      svg.addEventListener('mouseleave', () => {
+        if (tooltip) tooltip.style.display = 'none';
+        if (hoverDot) hoverDot.style.display = 'none';
+      });
+    }
+
+    // Add tooltip to the main chart (will be updated when we know if there are switches)
+    addChartTooltip(document.getElementById('totalChart'), () => shellyPlusPowerData, null);
 
     setInterval(fetchSamples, UPDATE_INTERVAL_MS);
     getDeviceName();
@@ -828,7 +1206,33 @@ footer a {
 
     function downloadCsv(event) {
       let mimeType = "text/plain";
-      let data = shellyPlusPowerData.join("\n");
+      let data;
+
+      if (shellySwitchPowerData.length > 0) {
+        // For power strip, include header and individual switch data
+        let header = "Total Power";
+        for (let i = 0; i < shellySwitchPowerData.length; ++i) {
+          const switchName = switchNames[i] || `Switch ${i}`;
+          header += `,${switchName}`;
+        }
+        data = header + "\n";
+
+        for (let i = 0; i < shellyPlusPowerData.length; ++i) {
+          let row = shellyPlusPowerData[i];
+          for (let switchId = 0; switchId < shellySwitchPowerData.length; switchId++) {
+            if (shellySwitchPowerData[switchId] && i < shellySwitchPowerData[switchId].length) {
+              row += "," + shellySwitchPowerData[switchId][i];
+            } else {
+              row += ",0";
+            }
+          }
+          data += row + "\n";
+        }
+      } else {
+        // Standard single power value per line
+        data = shellyPlusPowerData.join("\n");
+      }
+
       let url = URL.createObjectURL(
         new Blob([data], { type: mimeType })
       );
@@ -874,6 +1278,11 @@ footer a {
       profile.meta.profilingEndTime = shellyPlusPowerData.length * 1000;
       profile.meta.CPUName = deviceName;
 
+      // Only preserve order if we have multiple tracks
+      if (shellySwitchPowerData.length > 0) {
+        profile.meta.keepProfileThreadOrder = true;
+      }
+
       profile.meta.markerSchema = [
         {
           name: "volt",
@@ -911,6 +1320,22 @@ footer a {
                       `Data recorded by a ${deviceName} power meter`,
                       times, shellyPlusPowerData.map(WattSecondToPicoWattHour))
       ];
+
+      // Add individual switch counters if available
+      if (shellySwitchPowerData.length > 0) {
+        for (let switchId = 0; switchId < shellySwitchPowerData.length; switchId++) {
+          let switchData = shellySwitchPowerData[switchId];
+          if (switchData && switchData.length > 0) {
+            const switchName = switchNames[switchId] || `Switch ${switchId}`;
+            profile.counters.push(
+              counterObject(switchName,
+                           `${switchName} data from ${deviceName} power strip`,
+                           times.slice(0, switchData.length),
+                           switchData.map(WattSecondToPicoWattHour))
+            );
+          }
+        }
+      }
 
       let voltageIndex = stringTable._array.length;
       stringTable._array.push("Voltage");
