@@ -470,6 +470,87 @@ footer a {
   fill: #042f2e;
 }
 
+#debugLog {
+  background-color: #000;
+  color: #00ff00;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 10px;
+  height: 300px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+}
+
+.debug-message {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  padding: 0;
+}
+
+.debug-message.level-error {
+  color: #ff4444;
+}
+
+.debug-message.level-warn {
+  color: #ffaa00;
+}
+
+.debug-message.level-info {
+  color: #cccccc;
+}
+
+.debug-message.level-debug {
+  color: #00aaff;
+}
+
+.debug-message.level-verbose {
+  color: #888888;
+}
+
+#debugControls {
+  visibility: hidden;
+  display: flex;
+}
+
+#debugArea {
+  display: none;
+}
+
+#debugSection.debug-enabled #debugControls {
+  visibility: visible;
+}
+
+#debugSection.debug-enabled #debugArea {
+  display: block;
+}
+
+#debugHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#debugControls {
+  align-items: center;
+  gap: 10px;
+}
+
+#debugCount {
+  font-size: 12px;
+  color: #666;
+}
+
+#debugFilter {
+  width: 300px;
+  padding: 5px;
+}
+
+.debug-message.hidden {
+  display: none;
+}
+
   </style>
 </head>
 <body>
@@ -523,9 +604,25 @@ footer a {
       </tr>
     </table>
   </div>
+  <div id="debugSection">
+    <h3>Debug</h3>
+    <div id="debugHeader">
+      <label>
+        <input type="checkbox" id="debugCheckbox"> Show debug messages
+      </label>
+      <div id="debugControls">
+        <div id="debugCount"></div>
+        <input type="text" id="debugFilter" placeholder="Filter debug messages...">
+      </div>
+    </div>
+    <div id="debugArea">
+      <div id="debugLog"></div>
+    </div>
+  </div>
   </div>
   <script type="application/javascript">
     const UPDATE_INTERVAL_MS = 5000;
+    const DEBUG_LEVELS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'VERBOSE'];
     let shellyPlusPowerData = [];
     let shellyPlusVoltageData = [];
     let shellyPlusFreqData = [];
@@ -534,6 +631,11 @@ footer a {
     let shellyPlusLastIndex = -1;
     let deviceName = "Shelly Plus";
     let switchChartsCreated = false;
+    let debugEnabled = false;
+    let debugWebSocket = null;
+    let debugMessages = []; // Store raw debug messages for profiler
+    let debugMessageCount = 0;
+    let visibleDebugMessageCount = 0;
     // Load switch names from URL hash
     let switchNames = {};
     try {
@@ -553,6 +655,160 @@ footer a {
     function setText(id, text) {
       document.getElementById(id).innerHTML = text;
     }
+
+    function updateDebugMessageCount() {
+      let text = `${debugMessageCount} messages`;
+      if (visibleDebugMessageCount !== debugMessageCount) {
+        text = `${visibleDebugMessageCount} / ${text}`;
+      }
+      document.getElementById('debugCount').textContent = text;
+    }
+
+    function addDebugMessage(message, level = null) {
+      if (!debugEnabled) {
+        return;
+      }
+
+      const debugLog = document.getElementById('debugLog');
+      const timestamp = new Date().toLocaleTimeString();
+
+      // Check if user is at bottom before adding content
+      const wasAtBottom = debugLog.scrollTop >= debugLog.scrollHeight - debugLog.clientHeight - 5;
+
+      // Create message element
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'debug-message';
+      messageDiv.textContent = `[${timestamp}] ${message}`;
+      if (level) {
+        messageDiv.dataset.level = level;
+        messageDiv.className += ` level-${level.toLowerCase()}`;
+      }
+
+      // Apply current filter to new message
+      const filterText = document.getElementById('debugFilter').value.toLowerCase();
+      if (filterText === '' || messageDiv.textContent.toLowerCase().includes(filterText)) {
+        ++visibleDebugMessageCount;
+      } else {
+        messageDiv.classList.add('hidden');
+      }
+
+      debugLog.appendChild(messageDiv);
+      ++debugMessageCount;
+
+      // Limit displayed messages for performance (keep last 500 messages)
+      const messages = debugLog.children;
+      if (messages.length > 500) {
+        const removedMessage = messages[0];
+        if (!removedMessage.classList.contains('hidden')) {
+          --visibleDebugMessageCount;
+        }
+        --debugMessageCount;
+        removedMessage.remove();
+      }
+
+      // Only auto-scroll if user was already at bottom
+      if (wasAtBottom) {
+        debugLog.scrollTop = debugLog.scrollHeight;
+      }
+
+      // Update message count
+      updateDebugMessageCount();
+    }
+
+    const logDebug = addDebugMessage;
+
+    function connectDebugWebSocket() {
+      const ip = document.getElementById("ip").value;
+      const wsUrl = `ws://${ip}/debug/log`;
+
+      logDebug(`Connecting to debug WebSocket: ${wsUrl}`);
+      debugWebSocket = new WebSocket(wsUrl);
+
+      debugWebSocket.onopen = function() {
+        logDebug('Debug WebSocket connected');
+      };
+
+      debugWebSocket.onmessage = function(event) {
+        try {
+          const msg = JSON.parse(event.data);
+          // Keep raw messages for profiler markers.
+          debugMessages.push(msg);
+
+          // Display formatted message
+          const timestamp = new Date(msg.ts * 1000).toLocaleTimeString();
+          const level = DEBUG_LEVELS[msg.level] || `L${msg.level}`;
+
+          // Add formatted debug message (only show level prefix for non-INFO messages)
+          let formattedMessage = msg.data.trim();
+          if (level != 'INFO') {
+            formattedMessage =  `${level} — ${formattedMessage}`;
+          }
+          addDebugMessage(formattedMessage, level);
+        } catch (e) {
+          logDebug(`[RAW] ${event.data}`);
+        }
+      };
+
+      debugWebSocket.onclose = function(event) {
+        logDebug(`Debug WebSocket closed (${event.code}): ${event.reason}`);
+        debugWebSocket = null;
+      };
+
+      debugWebSocket.onerror = function(error) {
+        logDebug(`Debug WebSocket error: ${error}`);
+      };
+    }
+
+    // Setup debug checkbox
+    function updateDebugState() {
+      debugEnabled = document.getElementById('debugCheckbox').checked;
+      const debugSection = document.getElementById('debugSection');
+
+      if (debugEnabled) {
+        debugSection.classList.add('debug-enabled');
+        logDebug('Debug logging enabled');
+        connectDebugWebSocket();
+      } else {
+        debugSection.classList.remove('debug-enabled');
+        if (debugWebSocket) {
+          debugWebSocket.close();
+          debugWebSocket = null;
+        }
+        // Clear debug log and stored messages when disabled
+        debugMessages = [];
+        debugMessageCount = 0;
+        visibleDebugMessageCount = 0;
+        document.getElementById('debugLog').innerHTML = '';
+        document.getElementById('debugCount').textContent = '';
+      }
+    }
+
+    document.getElementById('debugCheckbox').addEventListener('change', updateDebugState);
+
+    // Check initial state on page load
+    updateDebugState();
+
+    // Setup debug filter
+    document.getElementById('debugFilter').addEventListener('input', function(e) {
+      const filterText = e.target.value.toLowerCase();
+      const debugLog = document.getElementById('debugLog');
+      const messages = debugLog.children;
+
+      visibleDebugMessageCount = 0;
+      for (let i = 0; i < messages.length; i++) {
+        const message = messages[i];
+        const messageText = message.textContent.toLowerCase();
+
+        if (filterText === '' || messageText.includes(filterText)) {
+          message.classList.remove('hidden');
+          ++visibleDebugMessageCount;
+        } else {
+          message.classList.add('hidden');
+        }
+      }
+      // Update message count after filtering
+      updateDebugMessageCount();
+    });
 
     function formatDuration(timeS) {
       let result = "";
@@ -1307,6 +1563,22 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
         }
       ];
 
+      // Add debug schema only if we have debug messages
+      if (debugMessages.length > 0) {
+        profile.meta.markerSchema.push({
+          name: "debug",
+          tooltipLabel: "{marker.data.message}",
+          tableLabel: "{marker.data.message}",
+          display: ["marker-chart", "marker-table"],
+          data: [
+            {key: "message", label: "Message", format: "string"},
+            {key: "from", label: "From", format: "string"},
+            {key: "level", label: "Level", format: "string"},
+            {key: "seq", label: "Sequence", format: "integer"}
+          ]
+        });
+      }
+
       let times = shellyPlusPowerData.map((v, i) => i * 1000);
       let zeros = new Array(times.length).fill(0);
 
@@ -1371,6 +1643,62 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
         markers.category.push(0);
         markers.name.push(pfIndex)
         markers.data.push({type: "pf", pf: shellyPlusPfData[i]});
+      }
+
+      // Add debug messages as markers if available
+      for (const debugMsg of debugMessages) {
+        // Convert Shelly timestamp to profile timestamp (milliseconds from start)
+        const profileTime = (debugMsg.ts * 1000) - startTime;
+
+        // Parse debug message format: "filename.ext:line   actual message"
+        let markerName = "debug";
+        let from = "";
+        let cleanMessage = debugMsg.data.trim();
+
+        // Check if message starts with filename:line pattern (with or without extension)
+        const locationMatch = debugMsg.data.match(/^([^:\s]+(?:\.[^:\s]+)?):(\d+)\s+(.+)$/);
+        if (locationMatch) {
+          const fullFilename = locationMatch[1];
+          const lineNum = locationMatch[2];
+          cleanMessage = locationMatch[3];
+
+          // Extract just filename without extension for marker name
+          markerName = fullFilename.replace(/\.[^.]*$/, '');
+          from = `${fullFilename}:${lineNum}`;
+        }
+
+        // Add the marker name to string table if not already present
+        let nameIndex = stringTable._array.indexOf(markerName);
+        if (nameIndex === -1) {
+          nameIndex = stringTable._array.length;
+          stringTable._array.push(markerName);
+        }
+
+        markers.startTime.push(profileTime);
+        markers.endTime.push(profileTime);
+        markers.phase.push(0); // Instant marker
+        markers.category.push(0);
+        markers.name.push(nameIndex);
+
+        // Create descriptive level string
+        const levelName = DEBUG_LEVELS[debugMsg.level] || 'UNKNOWN';
+        const levelString = `${levelName} (${debugMsg.level})`;
+
+        const markerData = {
+          type: "debug",
+          message: cleanMessage,
+          seq: debugMsg.seq
+        };
+
+        if (from) {
+          markerData.from = from;
+        }
+
+        if (levelName !== 'UNKNOWN') {
+          markerData.level = levelString;
+        }
+
+        markers.data.push(markerData);
       }
 
       markers.length = markers.name.length;
