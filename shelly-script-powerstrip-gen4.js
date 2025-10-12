@@ -1,38 +1,31 @@
 let startIndex = 0;
 let powerValues = [[], [], [], []];  // Array for each of the 4 switches
 let voltageValues = [];  // Voltage is typically shared
-let pending = [false, false, false, false];  // Track pending status for each switch
+let scriptId = Shelly.getCurrentScriptId();
 
 let notifyTimer = Timer.set(1000, true, function() {
-  // Collect data from all 4 switches
-  for (let switchId = 0; switchId < 4; switchId++) {
-    if (pending[switchId])
-      continue;
+  // Get system and script status synchronously
+  let sysStatus = Shelly.getComponentStatus("sys");
+  let scriptStatus = Shelly.getComponentStatus("script:" + scriptId);
+  console.log("sys", sysStatus.ram_size, sysStatus.ram_free, sysStatus.ram_min_free, scriptStatus.mem_used, scriptStatus.mem_peak, scriptStatus.mem_free);
 
-    pending[switchId] = true;
+  // Collect data from all 4 switches synchronously
+  for (let switchId = 0; switchId < 4; ++switchId) {
+    let switchStatus = Shelly.getComponentStatus("switch:" + switchId);
 
-    Shelly.call(
-      "Switch.GetStatus", { id: switchId },
-      function(res, err_code, err_msg) {
-        if (res) {
-          let id = res.id;
-          pending[id] = false;
-          if (powerValues[id].length >= 100) {
-            powerValues[id].splice(0, 1);
-            if (id === 0) {
-              voltageValues.splice(0, 1);
-              ++startIndex;
-            }
-          }
-
-          powerValues[id].push(res.apower);
-          if (id === 0) {
-            // Store voltage only from first switch to avoid duplicates
-            voltageValues.push(res.voltage);
-          }
-        }
+    if (powerValues[switchId].length >= 100) {
+      powerValues[switchId].splice(0, 1);
+      if (switchId === 0) {
+        voltageValues.splice(0, 1);
+        ++startIndex;
       }
-    );
+    }
+
+    powerValues[switchId].push(switchStatus.apower);
+    if (switchId === 0) {
+      // Store voltage only from first switch to avoid duplicates
+      voltageValues.push(switchStatus.voltage);
+    }
   }
 });
 

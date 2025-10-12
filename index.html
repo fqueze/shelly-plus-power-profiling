@@ -634,6 +634,9 @@ footer a {
     let debugEnabled = false;
     let debugWebSocket = null;
     let debugMessages = []; // Store raw debug messages for profiler
+    let memoryData = []; // Memory usage data parsed from debug messages
+    let scriptMemoryData = []; // Script-specific memory data from Script.GetStatus
+    let cpuData = []; // CPU utilization data from debug messages
     let debugMessageCount = 0;
     let visibleDebugMessageCount = 0;
     // Load switch names from URL hash
@@ -731,7 +734,54 @@ footer a {
       debugWebSocket.onmessage = function(event) {
         try {
           const msg = JSON.parse(event.data);
-          // Keep raw messages for profiler markers.
+
+          // Parse combined system and script memory info
+          const combinedMatch = msg.data.match(/^sys\s+(\d+)\s+(\d+)\s+(\d+|undefined)\s+(\d+)\s+(\d+)\s+(\d+)$/);
+          if (combinedMatch) {
+            // System memory data
+            const ramSize = parseInt(combinedMatch[1]);
+            const ramFree = parseInt(combinedMatch[2]);
+            const ramUsed = ramSize - ramFree;
+            const memoryPoint = {
+              ts: msg.ts,
+              ramFree: ramFree,
+              ramTotal: ramSize,
+              ramUsed: ramUsed,
+              usagePercent: Math.round((ramUsed / ramSize) * 100)
+            };
+            // Only include ramMinFree if it's available (Gen3+ devices only, older devices send 'undefined')
+            if (combinedMatch[3] !== 'undefined') {
+              memoryPoint.ramMinFree = parseInt(combinedMatch[3]);
+            }
+            memoryData.push(memoryPoint);
+
+            // Script memory data
+            const memUsed = parseInt(combinedMatch[4]);
+            const memPeak = parseInt(combinedMatch[5]);
+            const memFree = parseInt(combinedMatch[6]);
+            scriptMemoryData.push({
+              ts: msg.ts,
+              memUsed: memUsed,
+              memPeak: memPeak,
+              memFree: memFree
+            });
+
+            // Skip showing this message in debug log and profiler
+            return;
+          }
+
+          // Parse CPU utilization messages like "shelly_script.cpp:205   script:1 5.2% CPU utilization"
+          const cpuMatch = msg.data.match(/^shelly_script\.cpp:\d+\s+script:\d+\s+([\d.]+)%\s+CPU\s+utilization/);
+          if (cpuMatch) {
+            const cpu = parseFloat(cpuMatch[1]);
+            cpuData.push({
+              ts: msg.ts,
+              cpu: cpu
+            });
+            // Continue to show this message - it comes from the device, not our script
+          }
+
+          // Keep raw messages for profiler markers (only if not filtered above)
           debugMessages.push(msg);
 
           // Display formatted message
@@ -750,12 +800,25 @@ footer a {
       };
 
       debugWebSocket.onclose = function(event) {
-        logDebug(`Debug WebSocket closed (${event.code}): ${event.reason}`);
+        const reason = event.reason || 'No reason provided';
+        const codeText = event.code === 1006 ? '1006 (abnormal closure)' : event.code;
+        logDebug(`Debug WebSocket closed (${codeText}): ${reason}`);
         debugWebSocket = null;
+
+        // Auto-reconnect after 3 seconds if debugging is still enabled
+        if (debugEnabled) {
+          logDebug('Attempting to reconnect debug WebSocket in 3 seconds...');
+          setTimeout(() => {
+            if (debugEnabled && !debugWebSocket) {
+              connectDebugWebSocket();
+            }
+          }, 3000);
+        }
       };
 
-      debugWebSocket.onerror = function(error) {
-        logDebug(`Debug WebSocket error: ${error}`);
+      debugWebSocket.onerror = function(event) {
+        console.log('WebSocket error event:', event);
+        logDebug(`Debug WebSocket error: ${event.type} - Connection failed or interrupted`);
       };
     }
 
@@ -776,6 +839,9 @@ footer a {
         }
         // Clear debug log and stored messages when disabled
         debugMessages = [];
+        memoryData = [];
+        scriptMemoryData = [];
+        cpuData = [];
         debugMessageCount = 0;
         visibleDebugMessageCount = 0;
         document.getElementById('debugLog').innerHTML = '';
@@ -1528,10 +1594,30 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
       const baseProfile = '{"meta":{"interval":1000,"startTime":0,"abi":"","misc":"","oscpu":"","platform":"","processType":0,"extensions":{"id":[],"name":[],"baseURL":[],"length":0},"categories":[{"name":"Other","color":"grey","subcategories":["Other"]}],"product":"Home power profiling","stackwalk":0,"toolkit":"","version":27,"preprocessedProfileVersion":48,"appBuildID":"","sourceURL":"","physicalCPUs":1,"logicalCPUs":0,"CPUName":"Shelly Plus","symbolicationNotSupported":true,"markerSchema":[]},"libs":[],"pages":[],"threads":[{"processType":"default","processStartupTime":0,"processShutdownTime":null,"registerTime":0,"unregisterTime":null,"pausedRanges":[],"name":"GeckoMain","isMainThread":true,"pid":"0","tid":0,"samples":{"weightType":"samples","weight":null,"eventDelay":[],"stack":[],"time":[],"length":0},"markers":{"data":[],"name":[],"startTime":[],"endTime":[],"phase":[],"category":[],"length":0},"stackTable":{"frame":[0],"prefix":[null],"category":[0],"subcategory":[0],"length":1},"frameTable":{"address":[-1],"inlineDepth":[0],"category":[null],"subcategory":[0],"func":[0],"nativeSymbol":[null],"innerWindowID":[0],"implementation":[null],"line":[null],"column":[null],"length":1},"stringTable":{"_array":["(root)"],"_stringToIndex":{}},"funcTable":{"isJS":[false],"relevantForJS":[false],"name":[0],"resource":[-1],"fileName":[null],"lineNumber":[null],"columnNumber":[null],"length":1},"resourceTable":{"lib":[],"name":[],"host":[],"type":[],"length":0},"nativeSymbols":{"libIndex":[],"address":[],"name":[],"functionSize":[],"length":0}}],"counters":[]}';
 
       let profile = JSON.parse(baseProfile);
-      let startTime = Date.now() - shellyPlusPowerData.length * 1000;
+      // Return early if we have no data to profile
+      if (shellyPlusPowerData.length === 0 && debugMessages.length === 0) {
+        return null;
+      }
+
+      // Use actual start time based on when we started collecting data
+      let startTime;
+      if (lastUpdateTime && shellyPlusPowerData.length > 0) {
+        startTime = lastUpdateTime - shellyPlusPowerData.length * 1000;
+      } else {
+        startTime = debugMessages[0].ts * 1000;
+      }
+
       profile.meta.startTime = startTime;
       profile.meta.profilingStartTime = 0;
-      profile.meta.profilingEndTime = shellyPlusPowerData.length * 1000;
+
+      // Profile end time is either power data length or last debug message
+      let endTime = shellyPlusPowerData.length * 1000;
+      if (debugMessages.length > 0) {
+        const lastDebugTime = debugMessages.at(-1).ts * 1000;
+        endTime = Math.max(endTime, lastDebugTime - startTime);
+      }
+
+      profile.meta.profilingEndTime = endTime;
       profile.meta.CPUName = deviceName;
 
       // Only preserve order if we have multiple tracks
@@ -1560,6 +1646,47 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           display: [],
           data: [{key: "f", label: "Frequency (Hz)", format: "string"}],
           graphs: [{key: "f", color: "grey", type: "line-filled"}],
+        },
+        {
+          name: "memory",
+          tooltipLabel: "RAM: {marker.data.ramUsed}/{marker.data.ramSize} bytes ({marker.data.usagePercent}%) | Free: {marker.data.ramFree}",
+          display: [],
+          data: [
+            {key: "ramSize", label: "RAM Size (bytes)", format: "integer"},
+            {key: "ramFree", label: "RAM Free (bytes)", format: "integer"},
+            {key: "ramMinFree", label: "RAM Min Free (bytes)", format: "integer"},
+            {key: "ramUsed", label: "RAM Used (bytes)", format: "integer"},
+            {key: "usagePercent", label: "Usage %", format: "integer"}
+          ],
+          graphs: [{key: "usagePercent", color: "red", type: "line"}]
+        },
+        {
+          name: "script-memory",
+          tooltipLabel: "Script: {marker.data.memUsed} bytes used | Peak: {marker.data.memPeak} | Free: {marker.data.memFree} | Delta: {marker.data.memDelta} | Peak Delta: {marker.data.peakDelta}",
+          display: [],
+          data: [
+            {key: "memUsed", label: "Script Memory Used (bytes)", format: "integer"},
+            {key: "memPeak", label: "Script Memory Peak (bytes)", format: "integer"},
+            {key: "memFree", label: "Available Memory (bytes)", format: "integer"},
+            {key: "memDelta", label: "Memory Delta (bytes)", format: "integer"},
+            {key: "peakDelta", label: "Peak Delta (bytes)", format: "integer"}
+          ],
+          graphs: [
+            {key: "memUsed", color: "blue", type: "line"},
+            {key: "memPeak", color: "purple", type: "line"},
+            {key: "memFree", color: "green", type: "line"}
+          ]
+        },
+        {
+          name: "cpu",
+          tooltipLabel: "CPU: {marker.data.cpu}%",
+          display: [],
+          data: [
+            {key: "cpu", label: "CPU Usage (%)", format: "number"}
+          ],
+          graphs: [
+            {key: "cpu", color: "green", type: "line"}
+          ]
         }
       ];
 
@@ -1570,10 +1697,12 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           tooltipLabel: "{marker.data.message}",
           tableLabel: "{marker.data.message}",
           display: ["marker-chart", "marker-table"],
+          colorField: "color",
           data: [
             {key: "message", label: "Message", format: "string"},
             {key: "from", label: "From", format: "string"},
             {key: "level", label: "Level", format: "string"},
+            {key: "color", format: "string", hidden: true},
             {key: "seq", label: "Sequence", format: "integer"}
           ]
         });
@@ -1698,7 +1827,106 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           markerData.level = levelString;
         }
 
+        // Add color for ERROR and WARN levels
+        if (levelName === 'ERROR') {
+          markerData.color = 'red';
+        } else if (levelName === 'WARN') {
+          markerData.color = 'orange';
+        }
+
         markers.data.push(markerData);
+      }
+
+      // Add memory usage markers if available
+      for (const memoryPoint of memoryData) {
+        const profileTime = (memoryPoint.ts * 1000) - startTime;
+
+        // Add memory marker name to string table
+        const memoryMarkerName = "Memory";
+        let memoryNameIndex = stringTable._array.indexOf(memoryMarkerName);
+        if (memoryNameIndex === -1) {
+          memoryNameIndex = stringTable._array.length;
+          stringTable._array.push(memoryMarkerName);
+        }
+
+        markers.startTime.push(profileTime);
+        markers.endTime.push(profileTime);
+        markers.phase.push(0); // Instant marker
+        markers.category.push(0);
+        markers.name.push(memoryNameIndex);
+        const markerData = {
+          type: "memory",
+          ramSize: memoryPoint.ramTotal,
+          ramFree: memoryPoint.ramFree,
+          ramUsed: memoryPoint.ramUsed,
+          usagePercent: memoryPoint.usagePercent
+        };
+        // Only include ramMinFree if it exists
+        if (memoryPoint.ramMinFree !== undefined) {
+          markerData.ramMinFree = memoryPoint.ramMinFree;
+        }
+        markers.data.push(markerData);
+      }
+
+      // Add script memory markers if available
+      let prevMemoryData = null;
+      for (const scriptMemPoint of scriptMemoryData) {
+        const profileTime = (scriptMemPoint.ts * 1000) - startTime;
+
+        // Calculate deltas from previous point
+        let memDelta = 0;
+        let peakDelta = 0;
+        if (prevMemoryData) {
+          memDelta = scriptMemPoint.memUsed - prevMemoryData.memUsed;
+          peakDelta = scriptMemPoint.memPeak - prevMemoryData.memPeak;
+        }
+
+        // Add script memory marker name to string table
+        const scriptMemMarkerName = "Script Memory";
+        let scriptMemNameIndex = stringTable._array.indexOf(scriptMemMarkerName);
+        if (scriptMemNameIndex === -1) {
+          scriptMemNameIndex = stringTable._array.length;
+          stringTable._array.push(scriptMemMarkerName);
+        }
+
+        markers.startTime.push(profileTime);
+        markers.endTime.push(profileTime);
+        markers.phase.push(0); // Instant marker
+        markers.category.push(0);
+        markers.name.push(scriptMemNameIndex);
+        markers.data.push({
+          type: "script-memory",
+          memUsed: scriptMemPoint.memUsed,
+          memPeak: scriptMemPoint.memPeak,
+          memFree: scriptMemPoint.memFree,
+          memDelta: memDelta,
+          peakDelta: peakDelta
+        });
+
+        prevMemoryData = scriptMemPoint;
+      }
+
+      // Add CPU usage markers if available
+      for (const cpuPoint of cpuData) {
+        const profileTime = (cpuPoint.ts * 1000) - startTime;
+
+        // Add CPU marker name to string table
+        const cpuMarkerName = "CPU Usage";
+        let cpuNameIndex = stringTable._array.indexOf(cpuMarkerName);
+        if (cpuNameIndex === -1) {
+          cpuNameIndex = stringTable._array.length;
+          stringTable._array.push(cpuMarkerName);
+        }
+
+        markers.startTime.push(profileTime);
+        markers.endTime.push(profileTime);
+        markers.phase.push(0); // Instant marker
+        markers.category.push(0);
+        markers.name.push(cpuNameIndex);
+        markers.data.push({
+          type: "cpu",
+          cpu: cpuPoint.cpu
+        });
       }
 
       markers.length = markers.name.length;
