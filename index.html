@@ -630,6 +630,7 @@ footer a {
     let shellySwitchPowerData = []; // For individual switch data from Power Strip Gen4
     let shellyPlusLastIndex = -1;
     let deviceName = "Shelly Plus";
+    let deviceInfo = null; // Store full device info for profile metadata
     let switchChartsCreated = false;
     let debugEnabled = false;
     let debugWebSocket = null;
@@ -996,7 +997,8 @@ footer a {
       socket.onmessage = (event) => {
         let message = JSON.parse(event.data);
         if (message.id == 1) {
-          setDeviceName("Shelly " + message.result.app);
+          deviceInfo = message.result; // Store full device info
+          setDeviceName(deviceInfo.name || ("Shelly " + deviceInfo.app));
           socket.close();
         }
       };
@@ -1618,7 +1620,16 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
       }
 
       profile.meta.profilingEndTime = endTime;
-      profile.meta.CPUName = deviceName;
+
+      if (deviceInfo) {
+        profile.meta.product = deviceName;
+        profile.meta.device = deviceInfo.app;
+        profile.meta.CPUName = `${deviceInfo.model} (Gen${deviceInfo.gen})`;
+        profile.meta.platform = `Shelly Gen${deviceInfo.gen}`;
+        if (deviceInfo.fw_id) {
+          profile.meta.appBuildID = deviceInfo.fw_id;
+        }
+      }
 
       // Only preserve order if we have multiple tracks
       if (shellySwitchPowerData.length > 0) {
