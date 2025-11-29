@@ -1749,40 +1749,31 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
         }
       }
 
+      function addInstantMarker(startTime, nameIndex, data) {
+        markers.startTime.push(startTime);
+        markers.endTime.push(startTime);
+        markers.phase.push(0);
+        markers.category.push(0);
+        markers.name.push(nameIndex);
+        markers.data.push(data);
+      }
+
       let voltageIndex = stringTable._array.length;
       stringTable._array.push("Voltage");
       for (let i = 0; i < shellyPlusVoltageData.length; ++i) {
-        markers.startTime.push(times[i]);
-        markers.endTime.push(times[i]);
-        // 0 = Instant marker, 1 = marker with start and end times, 2 = start but no end.
-        markers.phase.push(1)
-        markers.category.push(0);
-        markers.name.push(voltageIndex)
-        markers.data.push({type: "volt", v: shellyPlusVoltageData[i]});
+        addInstantMarker(times[i], voltageIndex, {type: "volt", v: shellyPlusVoltageData[i]});
       }
 
       let freqIndex = stringTable._array.length;
       stringTable._array.push("Frequency");
       for (let i = 0; i < shellyPlusFreqData.length; ++i) {
-        markers.startTime.push(times[i]);
-        markers.endTime.push(times[i]);
-        // 0 = Instant marker, 1 = marker with start and end times, 2 = start but no end.
-        markers.phase.push(1)
-        markers.category.push(0);
-        markers.name.push(freqIndex)
-        markers.data.push({type: "f", f: shellyPlusFreqData[i]});
+        addInstantMarker(times[i], freqIndex, {type: "f", f: shellyPlusFreqData[i]});
       }
 
       let pfIndex = stringTable._array.length;
       stringTable._array.push("Power Factor");
       for (let i = 0; i < shellyPlusPfData.length; ++i) {
-        markers.startTime.push(times[i]);
-        markers.endTime.push(times[i]);
-        // 0 = Instant marker, 1 = marker with start and end times, 2 = start but no end.
-        markers.phase.push(1)
-        markers.category.push(0);
-        markers.name.push(pfIndex)
-        markers.data.push({type: "pf", pf: shellyPlusPfData[i]});
+        addInstantMarker(times[i], pfIndex, {type: "pf", pf: shellyPlusPfData[i]});
       }
 
       // Add debug messages as markers if available
@@ -1814,12 +1805,6 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           stringTable._array.push(markerName);
         }
 
-        markers.startTime.push(profileTime);
-        markers.endTime.push(profileTime);
-        markers.phase.push(0); // Instant marker
-        markers.category.push(0);
-        markers.name.push(nameIndex);
-
         // Create descriptive level string
         const levelName = DEBUG_LEVELS[debugMsg.level] || 'UNKNOWN';
         const levelString = `${levelName} (${debugMsg.level})`;
@@ -1845,7 +1830,7 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           markerData.color = 'orange';
         }
 
-        markers.data.push(markerData);
+        addInstantMarker(profileTime, nameIndex, markerData);
       }
 
       // Add memory usage markers if available
@@ -1860,11 +1845,6 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           stringTable._array.push(memoryMarkerName);
         }
 
-        markers.startTime.push(profileTime);
-        markers.endTime.push(profileTime);
-        markers.phase.push(0); // Instant marker
-        markers.category.push(0);
-        markers.name.push(memoryNameIndex);
         const markerData = {
           type: "memory",
           ramSize: memoryPoint.ramTotal,
@@ -1876,7 +1856,7 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
         if (memoryPoint.ramMinFree !== undefined) {
           markerData.ramMinFree = memoryPoint.ramMinFree;
         }
-        markers.data.push(markerData);
+        addInstantMarker(profileTime, memoryNameIndex, markerData);
       }
 
       // Add script memory markers if available
@@ -1900,12 +1880,7 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           stringTable._array.push(scriptMemMarkerName);
         }
 
-        markers.startTime.push(profileTime);
-        markers.endTime.push(profileTime);
-        markers.phase.push(0); // Instant marker
-        markers.category.push(0);
-        markers.name.push(scriptMemNameIndex);
-        markers.data.push({
+        addInstantMarker(profileTime, scriptMemNameIndex, {
           type: "script-memory",
           memUsed: scriptMemPoint.memUsed,
           memPeak: scriptMemPoint.memPeak,
@@ -1929,12 +1904,7 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           stringTable._array.push(cpuMarkerName);
         }
 
-        markers.startTime.push(profileTime);
-        markers.endTime.push(profileTime);
-        markers.phase.push(0); // Instant marker
-        markers.category.push(0);
-        markers.name.push(cpuNameIndex);
-        markers.data.push({
+        addInstantMarker(profileTime, cpuNameIndex, {
           type: "cpu",
           cpu: cpuPoint.cpu
         });
