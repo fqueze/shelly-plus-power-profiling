@@ -949,39 +949,71 @@ footer a {
     }
 
     function calculateMedian(data) {
-      // Quickselect algorithm for finding median in O(n) average time
+      // Iterative quickselect algorithm for finding median in O(n) average time
+      // Uses iteration instead of recursion to avoid stack overflow with large datasets
+      // Uses median-of-three pivot selection and 3-way partitioning for duplicates
       const arr = data.slice();
       const k = Math.floor(arr.length / 2);
 
-      function partition(arr, left, right) {
-        const pivot = arr[right];
-        let i = left;
+      function medianOfThree(arr, left, right) {
+        const mid = Math.floor((left + right) / 2);
+        // Sort left, mid, right elements
+        if (arr[left] > arr[mid]) [arr[left], arr[mid]] = [arr[mid], arr[left]];
+        if (arr[left] > arr[right]) [arr[left], arr[right]] = [arr[right], arr[left]];
+        if (arr[mid] > arr[right]) [arr[mid], arr[right]] = [arr[right], arr[mid]];
+        // Move median to right position for partitioning
+        [arr[mid], arr[right]] = [arr[right], arr[mid]];
+      }
 
-        for (let j = left; j < right; ++j) {
-          if (arr[j] <= pivot) {
-            [arr[i], arr[j]] = [arr[j], arr[i]];
-            ++i;
+      function partition3way(arr, left, right) {
+        // 3-way partitioning (Dutch National Flag algorithm)
+        // Divides array into: [< pivot] [== pivot] [> pivot]
+        // This is critical for performance when data has many duplicate values,
+        // which is common in real power consumption data (e.g., idle states)
+        medianOfThree(arr, left, right);
+        const pivot = arr[right];
+        let lt = left;      // arr[left..lt-1] < pivot
+        let gt = right;     // arr[gt+1..right] > pivot
+        let i = left;       // arr[lt..i-1] == pivot
+
+        while (i <= gt) {
+          if (arr[i] < pivot) {
+            [arr[lt], arr[i]] = [arr[i], arr[lt]];
+            lt++;
+            i++;
+          } else if (arr[i] > pivot) {
+            [arr[i], arr[gt]] = [arr[gt], arr[i]];
+            gt--;
+          } else {
+            i++;
           }
         }
-        [arr[i], arr[right]] = [arr[right], arr[i]];
-        return i;
+        return [lt, gt]; // Elements equal to pivot are in range [lt..gt]
       }
 
-      function quickselect(arr, left, right, k) {
-        if (left === right) return arr[left];
+      let left = 0;
+      let right = arr.length - 1;
 
-        const pivotIndex = partition(arr, left, right);
+      while (left < right) {
+        const [lt, gt] = partition3way(arr, left, right);
 
-        if (k === pivotIndex) {
-          return arr[k];
-        } else if (k < pivotIndex) {
-          return quickselect(arr, left, pivotIndex - 1, k);
+        // After partitioning: [elements < pivot] [elements == pivot] [elements > pivot]
+        //                     [left...lt-1]      [lt...gt]           [gt+1...right]
+        if (k < lt) {
+          // Median is in the "less than" section
+          right = lt - 1;
+        } else if (k > gt) {
+          // Median is in the "greater than" section
+          left = gt + 1;
         } else {
-          return quickselect(arr, pivotIndex + 1, right, k);
+          // Median is in the "equal to" section [lt..gt]
+          // All values in this range are identical, so we can return immediately
+          // This handles constant data (O(n)) and data with many duplicates efficiently
+          return arr[k];
         }
       }
 
-      return quickselect(arr, 0, arr.length - 1, k);
+      return arr[k];
     }
 
     function setDeviceName(name) {
