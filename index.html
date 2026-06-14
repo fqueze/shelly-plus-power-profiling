@@ -627,6 +627,7 @@ footer a {
     let shellyPlusVoltageData = [];
     let shellyPlusFreqData = [];
     let shellyPlusPfData = [];
+    let shellyPlusPositionData = []; // For cover position from Plus2PM in cover mode
     let shellySwitchPowerData = []; // For individual switch data from Power Strip Gen4
     let shellyPlusLastIndex = -1;
     let deviceName = "Shelly Plus";
@@ -1093,6 +1094,9 @@ footer a {
           shellyPlusFreqData = data.freq_values.slice();
           shellyPlusPfData = data.pf_values.slice();
         }
+        if (data.position_values) {
+          shellyPlusPositionData = data.position_values.slice();
+        }
         shellyPlusLastIndex = data.start_index + shellyPlusPowerData.length;
 
         // Show content and update time for initial data
@@ -1138,6 +1142,10 @@ footer a {
           shellyPlusFreqData = shellyPlusFreqData.concat(newFreqData);
           let newPfData = data.pf_values.slice(sliceStart);
           shellyPlusPfData = shellyPlusPfData.concat(newPfData);
+        }
+        if (data.position_values) {
+          let newPositionData = data.position_values.slice(sliceStart);
+          shellyPlusPositionData = shellyPlusPositionData.concat(newPositionData);
         }
 
         let dataLength = Array.isArray(data.power_values[0]) ? data.power_values[0].length - sliceStart : data.power_values.length - sliceStart;
@@ -1692,6 +1700,13 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
           graphs: [{key: "f", color: "grey", type: "line-filled"}],
         },
         {
+          name: "pos",
+          tooltipLabel: "{marker.data.pos}",
+          display: [],
+          data: [{key: "pos", label: "Cover position (%)", format: "string"}],
+          graphs: [{key: "pos", color: "green", type: "line-filled"}],
+        },
+        {
           name: "memory",
           tooltipLabel: "RAM: {marker.data.ramUsed}/{marker.data.ramSize} bytes ({marker.data.usagePercent}%) | Free: {marker.data.ramFree}",
           display: [],
@@ -1807,6 +1822,15 @@ Total Energy: ${formatEnergy(energy, ' ')}`;
       stringTable._array.push("Power Factor");
       for (let i = 0; i < shellyPlusPfData.length; ++i) {
         addInstantMarker(times[i], pfIndex, {type: "pf", pf: shellyPlusPfData[i]});
+      }
+
+      let positionIndex = stringTable._array.length;
+      stringTable._array.push("Cover Position");
+      for (let i = 0; i < shellyPlusPositionData.length; ++i) {
+        // current_pos is null until the cover is calibrated; skip those.
+        if (shellyPlusPositionData[i] != null) {
+          addInstantMarker(times[i], positionIndex, {type: "pos", pos: shellyPlusPositionData[i]});
+        }
       }
 
       // Add debug messages as markers if available

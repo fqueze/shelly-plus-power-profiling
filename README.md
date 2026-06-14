@@ -9,4 +9,9 @@ Note: To have permission to request data from Shelly devices in your local netwo
 
 The `shelly-script.js` file contains the script that needs to be added to the Shelly Plus device (eg. Shelly PlusPlugS) on which the power metering needs to happen.
 
+Other scripts are provided for specific devices:
+- `shelly-script-em.js` for devices exposing an energy meter (EM1).
+- `shelly-script-powerstrip-gen4.js` for the 4-channel Power Strip Gen4 (records each switch separately).
+- `shelly-script-plus2pm-cover.js` for the Shelly Plus2PM configured in cover/roller mode (records the cover's power, voltage and position).
+
 On the web page, configure the IP address of your Shelly device in your local network (eg. 192.168.1.89) and the script URL.
